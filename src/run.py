@@ -58,7 +58,7 @@ if history_length > len(df):
 x_col  = df.columns[0]
 y_cols = list(df.columns[1:])
 
-df = df.sort_values(by=x_col).tail(history_length).reset_index(drop=True)
+df = df.tail(history_length).reset_index(drop=True)
 x_series = df[x_col]
 y_df     = df[y_cols]
 
