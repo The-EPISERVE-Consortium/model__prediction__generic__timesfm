@@ -1,4 +1,3 @@
-import re
 import numpy as np
 import pandas as pd
 import timesfm
@@ -7,8 +6,6 @@ _tfm = None
 
 # Max forecast steps (must be a multiple of 128).
 _MAX_PREDICTION_STEPS = 512
-
-_ISO_WEEK_RE = re.compile(r"^\d{4}-W\d{2}$")
 
 
 def _model():
@@ -38,23 +35,10 @@ def _extrapolate_x(x_series: pd.Series, n: int) -> list:
         return [last + step * (i + 1) for i in range(n)]
 
     if pd.api.types.is_string_dtype(x_series) or pd.api.types.is_object_dtype(x_series):
-        sample = str(x_series.iloc[0])
-        if _ISO_WEEK_RE.match(sample):
-            # e.g. "2025-W45" — parse as ISO week (Monday of that week) then step weekly
-            parsed = pd.to_datetime(x_series + "-1", format="%G-W%V-%u")
-            step = parsed.diff().dropna().median()
-            last = parsed.iloc[-1]
-            future = [last + step * (i + 1) for i in range(n)]
-            return [f"{dt.isocalendar().year}-W{dt.isocalendar().week:02d}" for dt in future]
-        try:
-            parsed = pd.to_datetime(x_series)
-            step = parsed.diff().dropna().median()
-            last = parsed.iloc[-1]
-            return [last + step * (i + 1) for i in range(n)]
-        except Exception:
-            pass
-        # non-parseable strings: use integer positions as fallback
-        return list(range(len(x_series), len(x_series) + n))
+        # String x: rows are already ordered by the string column; future positions
+        # continue the integer sequence (len+1, len+2, ...).
+        base = len(x_series)
+        return list(range(base + 1, base + 1 + n))
 
     # numeric
     step = float(x_series.diff().dropna().median())
