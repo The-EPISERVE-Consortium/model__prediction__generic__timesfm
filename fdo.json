@@ -1,0 +1,15 @@
+{
+  "@context": "https://schema.org/",
+  "@type": "SoftwareApplication",
+  "name": "model__prediction__generic__timesfm",
+  "description": "Generic time-series forecast model using Google TimesFM 2.5, a 200M-parameter foundation model applied zero-shot. Reads any parquet with a leading x column and arbitrary y columns; forecasts each y series independently with point + 10th/90th percentile predictions.",
+  "url": "ghcr.io/the-episerve-consortium/model__prediction__generic__timesfm",
+  "codeRepository": "https://github.com/The-EPISERVE-Consortium/model__prediction__generic__timesfm",
+  "applicationCategory": "algorithm",
+  "operatingSystem": "Linux",
+  "runtimePlatform": "Docker",
+  "author": {
+    "@type": "Organization",
+    "name": "EPISERVE Consortium"
+  }
+}
