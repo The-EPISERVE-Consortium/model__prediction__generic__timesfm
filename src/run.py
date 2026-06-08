@@ -25,13 +25,18 @@ for key in ("history_length", "prediction_length"):
 
 history_length    = int(config["history_length"])
 prediction_length = int(config["prediction_length"])
-print(f"Config: history_length={history_length}, prediction_length={prediction_length}")
+prediction_offset = int(config.get("prediction_offset", 0))
+print(f"Config: history_length={history_length}, prediction_length={prediction_length}, prediction_offset={prediction_offset}")
 
 if prediction_length > _MAX_PREDICTION_STEPS:
     print(
         f"ERROR: prediction_length={prediction_length} exceeds max {_MAX_PREDICTION_STEPS} steps",
         file=sys.stderr,
     )
+    sys.exit(1)
+
+if prediction_offset < 0:
+    print("ERROR: prediction_offset must be >= 0", file=sys.stderr)
     sys.exit(1)
 
 # ── Data ──────────────────────────────────────────────────────────────────────
@@ -47,9 +52,9 @@ if len(df_full.columns) < 2:
     print("ERROR: input.parquet must have at least 2 columns (x + at least one y)", file=sys.stderr)
     sys.exit(1)
 
-if history_length > len(df_full):
+if history_length + prediction_offset > len(df_full):
     print(
-        f"ERROR: history_length={history_length} exceeds available rows ({len(df_full)})",
+        f"ERROR: history_length + prediction_offset ({history_length + prediction_offset}) exceeds available rows ({len(df_full)})",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -60,20 +65,21 @@ y_cols     = list(df_full.columns[1:])
 total_rows = len(df_full)
 is_string_x = pd.api.types.is_string_dtype(df_full[x_col]) or pd.api.types.is_object_dtype(df_full[x_col])
 
-df = df_full.tail(history_length).reset_index(drop=True)
+end_idx   = total_rows - prediction_offset
+start_idx = end_idx - history_length
+df = df_full.iloc[start_idx:end_idx].reset_index(drop=True)
 x_series = df[x_col]
 y_df     = df[y_cols]
 
 print(f"x column: {x_col!r}, y columns: {y_cols}")
-print(f"Using {len(df)} rows ({x_series.iloc[0]} – {x_series.iloc[-1]})")
+print(f"Using rows {start_idx}–{end_idx - 1} ({x_series.iloc[0]} – {x_series.iloc[-1]})")
 
 # ── Predict ───────────────────────────────────────────────────────────────────
 predictions = predict(x_series, y_df, prediction_length)
 
 # ── Fix x_auto_converted to absolute positions ────────────────────────────────
 if is_string_x and "x_auto_converted" in predictions.columns:
-    offset = total_rows - history_length
-    predictions["x_auto_converted"] += offset
+    predictions["x_auto_converted"] += start_idx
     predictions[x_col] = predictions["x_auto_converted"]
 
 # ── Output ────────────────────────────────────────────────────────────────────
