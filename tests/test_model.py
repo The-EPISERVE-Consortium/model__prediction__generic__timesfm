@@ -87,6 +87,22 @@ def test_quantile_ordering():
         assert (result[f"{col}_q10"] <= result[f"{col}_q90"]).all()
 
 
+def test_x_extrapolation_iso_week():
+    weeks = [f"{2022 + i // 52}-W{(i % 52) + 1:02d}" for i in range(60)]
+    x = pd.Series(weeks, name="Meldewoche")
+    y = pd.DataFrame({"cases": np.random.rand(60) * 100})
+    result = predict(x, y, prediction_length=3)
+    assert result.columns[0] == "Meldewoche"
+    # values should look like YYYY-Www
+    import re
+    for val in result["Meldewoche"]:
+        assert re.match(r"^\d{4}-W\d{2}$", val), f"unexpected format: {val}"
+    # each step is one week ahead of the previous
+    parsed = pd.to_datetime(result["Meldewoche"] + "-1", format="%G-W%V-%u")
+    diffs = parsed.diff().dropna()
+    assert (diffs == pd.Timedelta(weeks=1)).all()
+
+
 def test_exceeds_max_raises():
     x, y = _make_xy()
     with pytest.raises(ValueError, match="exceeds max"):

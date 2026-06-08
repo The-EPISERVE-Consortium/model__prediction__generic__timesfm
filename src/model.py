@@ -1,3 +1,4 @@
+import re
 import numpy as np
 import pandas as pd
 import timesfm
@@ -6,6 +7,8 @@ _tfm = None
 
 # Max forecast steps (must be a multiple of 128).
 _MAX_PREDICTION_STEPS = 512
+
+_ISO_WEEK_RE = re.compile(r"^\d{4}-W\d{2}$")
 
 
 def _model():
@@ -24,19 +27,44 @@ def _model():
     return _tfm
 
 
-def _infer_step(x_series: pd.Series):
-    """Infer median step size from an ordered x series (datetime or numeric)."""
-    diffs = x_series.diff().dropna()
-    if diffs.empty:
+def _extrapolate_x(x_series: pd.Series, n: int) -> list:
+    """Return n future x values extrapolated from x_series."""
+    if len(x_series) < 2:
         raise ValueError("x_series must contain at least 2 values to infer step size")
+
     if pd.api.types.is_datetime64_any_dtype(x_series):
-        return diffs.median()
-    return float(diffs.median())
+        step = x_series.diff().dropna().median()
+        last = x_series.iloc[-1]
+        return [last + step * (i + 1) for i in range(n)]
+
+    if pd.api.types.is_string_dtype(x_series) or pd.api.types.is_object_dtype(x_series):
+        sample = str(x_series.iloc[0])
+        if _ISO_WEEK_RE.match(sample):
+            # e.g. "2025-W45" — parse as ISO week (Monday of that week) then step weekly
+            parsed = pd.to_datetime(x_series + "-1", format="%G-W%V-%u")
+            step = parsed.diff().dropna().median()
+            last = parsed.iloc[-1]
+            future = [last + step * (i + 1) for i in range(n)]
+            return [f"{dt.isocalendar().year}-W{dt.isocalendar().week:02d}" for dt in future]
+        try:
+            parsed = pd.to_datetime(x_series)
+            step = parsed.diff().dropna().median()
+            last = parsed.iloc[-1]
+            return [last + step * (i + 1) for i in range(n)]
+        except Exception:
+            pass
+        # non-parseable strings: use integer positions as fallback
+        return list(range(len(x_series), len(x_series) + n))
+
+    # numeric
+    step = float(x_series.diff().dropna().median())
+    last = float(x_series.iloc[-1])
+    return [last + step * (i + 1) for i in range(n)]
 
 
 def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> pd.DataFrame:
     """
-    x_series:          pd.Series of x values (datetime or numeric); determines future x axis.
+    x_series:          pd.Series of x values (datetime, numeric, or ISO-week string).
     y_df:              pd.DataFrame where each column is an independent time series to forecast.
     prediction_length: number of steps ahead to predict.
 
@@ -57,9 +85,7 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
     # point:     (n_cols, prediction_length)
     # quantiles: (n_cols, prediction_length, 10)
 
-    step = _infer_step(x_series)
-    last_x = x_series.iloc[-1]
-    future_x = [last_x + step * (i + 1) for i in range(prediction_length)]
+    future_x = _extrapolate_x(x_series, prediction_length)
 
     rows = []
     for i in range(prediction_length):
