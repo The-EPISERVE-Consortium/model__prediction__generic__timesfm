@@ -54,7 +54,11 @@ if len(df_full.columns) < 2:
 
 if history_length + prediction_offset > len(df_full):
     print(
-        f"ERROR: history_length + prediction_offset ({history_length + prediction_offset}) exceeds available rows ({len(df_full)})",
+        f"ERROR: not enough input data — "
+        f"history_length ({history_length}) + prediction_offset ({prediction_offset}) "
+        f"= {history_length + prediction_offset} rows required, "
+        f"but input.parquet only has {len(df_full)} rows. "
+        f"Reduce history_length/prediction_offset or provide more input data.",
         file=sys.stderr,
     )
     sys.exit(1)
