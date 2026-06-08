@@ -94,6 +94,14 @@ def test_x_string_column_outputs_integer_positions():
     result = predict(x, y, prediction_length=3)
     assert result.columns[0] == "Meldewoche"
     assert list(result["Meldewoche"]) == [51, 52, 53]
+    assert "x_auto_converted" in result.columns
+    assert list(result["x_auto_converted"]) == [51, 52, 53]
+
+
+def test_x_non_string_column_has_no_auto_converted():
+    x, y = _make_xy(y_cols=("val",))
+    result = predict(x, y, prediction_length=3)
+    assert "x_auto_converted" not in result.columns
 
 
 def test_exceeds_max_raises():

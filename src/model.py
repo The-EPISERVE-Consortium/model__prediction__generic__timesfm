@@ -69,11 +69,17 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
     # point:     (n_cols, prediction_length)
     # quantiles: (n_cols, prediction_length, 10)
 
+    is_string_x = (
+        pd.api.types.is_string_dtype(x_series)
+        or pd.api.types.is_object_dtype(x_series)
+    )
     future_x = _extrapolate_x(x_series, prediction_length)
 
     rows = []
     for i in range(prediction_length):
         row = {x_series.name: future_x[i]}
+        if is_string_x:
+            row["x_auto_converted"] = future_x[i]
         for j, col in enumerate(y_df.columns):
             row[col]          = float(point[j, i])
             row[f"{col}_q10"] = float(quantiles[j, i, 0])
