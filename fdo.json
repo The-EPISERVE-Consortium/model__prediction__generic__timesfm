@@ -11,5 +11,27 @@
   "author": {
     "@type": "Organization",
     "name": "EPISERVE Consortium"
-  }
+  },
+  "additionalProperty": [
+    {
+      "@type": "PropertyValue",
+      "name": "history_length",
+      "description": "Number of rows to use as model context. Window ends at total_rows - prediction_offset.",
+      "valueRequired": true
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "prediction_length",
+      "description": "Number of steps to forecast ahead. Maximum: 512.",
+      "valueRequired": true,
+      "maxValue": 512
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "prediction_offset",
+      "description": "Rows to skip at the end before the history window. Use for back-testing against known data.",
+      "valueRequired": false,
+      "value": 0
+    }
+  ]
 }
