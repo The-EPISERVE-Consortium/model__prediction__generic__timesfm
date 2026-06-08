@@ -40,25 +40,27 @@ if not data_path.exists():
     print("ERROR: /work/input/input.parquet not found", file=sys.stderr)
     sys.exit(1)
 
-df = pd.read_parquet(data_path)
-print(f"Loaded {len(df)} rows, columns: {list(df.columns)}")
+df_full = pd.read_parquet(data_path)
+print(f"Loaded {len(df_full)} rows, columns: {list(df_full.columns)}")
 
-if len(df.columns) < 2:
+if len(df_full.columns) < 2:
     print("ERROR: input.parquet must have at least 2 columns (x + at least one y)", file=sys.stderr)
     sys.exit(1)
 
-if history_length > len(df):
+if history_length > len(df_full):
     print(
-        f"ERROR: history_length={history_length} exceeds available rows ({len(df)})",
+        f"ERROR: history_length={history_length} exceeds available rows ({len(df_full)})",
         file=sys.stderr,
     )
     sys.exit(1)
 
 # ── Prepare ───────────────────────────────────────────────────────────────────
-x_col  = df.columns[0]
-y_cols = list(df.columns[1:])
+x_col      = df_full.columns[0]
+y_cols     = list(df_full.columns[1:])
+total_rows = len(df_full)
+is_string_x = pd.api.types.is_string_dtype(df_full[x_col]) or pd.api.types.is_object_dtype(df_full[x_col])
 
-df = df.tail(history_length).reset_index(drop=True)
+df = df_full.tail(history_length).reset_index(drop=True)
 x_series = df[x_col]
 y_df     = df[y_cols]
 
@@ -68,9 +70,24 @@ print(f"Using {len(df)} rows ({x_series.iloc[0]} – {x_series.iloc[-1]})")
 # ── Predict ───────────────────────────────────────────────────────────────────
 predictions = predict(x_series, y_df, prediction_length)
 
+# ── Fix x_auto_converted to absolute positions ────────────────────────────────
+if is_string_x and "x_auto_converted" in predictions.columns:
+    offset = total_rows - history_length
+    predictions["x_auto_converted"] += offset
+    predictions[x_col] = predictions["x_auto_converted"]
+
 # ── Output ────────────────────────────────────────────────────────────────────
 OUTPUT.mkdir(parents=True, exist_ok=True)
+
 out_path = OUTPUT / "predictions.tsv"
 predictions.to_csv(out_path, sep="\t", index=False)
 print(f"Written {len(predictions)} rows to {out_path}")
+
+if is_string_x:
+    df_annotated = df_full.copy()
+    df_annotated.insert(1, "x_auto_converted", range(1, total_rows + 1))
+    ann_path = OUTPUT / "input_annotated.tsv"
+    df_annotated.to_csv(ann_path, sep="\t", index=False)
+    print(f"Written {len(df_annotated)} rows to {ann_path}")
+
 print("Done.")
