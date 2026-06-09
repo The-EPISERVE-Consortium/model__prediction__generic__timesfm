@@ -4,7 +4,7 @@ import pandas as pd
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from model import predict, _MAX_PREDICTION_STEPS
+from model import predict, _MAX_PREDICTION_STEPS, _MAX_CONTEXT
 
 _work  = Path("./work") if Path("./work").exists() else Path("/work")
 INPUT  = _work / "input"
@@ -38,6 +38,13 @@ if prediction_length > _MAX_PREDICTION_STEPS:
 if prediction_offset < 0:
     print("ERROR: prediction_offset must be >= 0", file=sys.stderr)
     sys.exit(1)
+
+if history_length > _MAX_CONTEXT:
+    print(
+        f"WARNING: history_length={history_length} exceeds model max context "
+        f"{_MAX_CONTEXT}; only the most recent {_MAX_CONTEXT} points will be used.",
+        file=sys.stderr,
+    )
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 data_path = INPUT / "input.parquet"

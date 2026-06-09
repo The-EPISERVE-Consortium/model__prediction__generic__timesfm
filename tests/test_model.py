@@ -20,9 +20,12 @@ def _make_xy(n=100, y_cols=("a", "b"), freq="D"):
 def _mock_forecast(inputs, horizon):
     batch = len(inputs)
     point = np.full((batch, horizon), 45.0)
+    # Channels are [mean, q0.1, q0.2, ..., q0.9]: index 0 is the mean, index 1
+    # is q0.1, index 9 is q0.9.
     quantiles = np.zeros((batch, horizon, 10))
-    quantiles[..., 0]  = 30.0
-    quantiles[..., -1] = 60.0
+    quantiles[..., 0]  = 45.0  # mean
+    quantiles[..., 1]  = 30.0  # q0.1
+    quantiles[..., -1] = 60.0  # q0.9
     return point, quantiles
 
 
@@ -78,6 +81,15 @@ def test_single_y_column():
     x, y = _make_xy(y_cols=("value",))
     result = predict(x, y, prediction_length=5)
     assert set(result.columns) == {"date", "value", "value_q10", "value_q90"}
+
+
+def test_q10_reads_q01_channel_not_mean():
+    # q10 must come from channel 1 (q0.1=30.0), not channel 0 (mean=45.0).
+    x, y = _make_xy()
+    result = predict(x, y, prediction_length=5)
+    for col in y.columns:
+        assert (result[f"{col}_q10"] == 30.0).all()
+        assert (result[f"{col}_q90"] == 60.0).all()
 
 
 def test_quantile_ordering():

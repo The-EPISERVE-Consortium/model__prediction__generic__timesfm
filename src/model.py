@@ -7,6 +7,12 @@ _tfm = None
 # Max forecast steps (must be a multiple of 128).
 _MAX_PREDICTION_STEPS = 512
 
+# Max history points fed to the model. TimesFM 2.5 supports up to 16384; more
+# context lets the model capture multi-cycle seasonality (e.g. yearly patterns
+# in epidemiological data). History longer than this is truncated to the most
+# recent _MAX_CONTEXT points by the model.
+_MAX_CONTEXT = 2048
+
 
 def _model():
     global _tfm
@@ -15,7 +21,7 @@ def _model():
             "google/timesfm-2.5-200m-pytorch"
         )
         tfm.compile(timesfm.ForecastConfig(
-            max_context=512,
+            max_context=_MAX_CONTEXT,
             max_horizon=_MAX_PREDICTION_STEPS,
             normalize_inputs=True,
             fix_quantile_crossing=True,
@@ -60,14 +66,25 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
             f"prediction_length={prediction_length} exceeds max {_MAX_PREDICTION_STEPS} steps"
         )
 
+    # Missing values are gaps, not zeros — filling with 0.0 injects artificial
+    # cliffs that corrupt the model's input normalization. Interpolate interior
+    # gaps linearly and carry the nearest value over leading/trailing NaNs.
     inputs = [
-        y_df[col].fillna(0.0).to_numpy(dtype=np.float64)
+        y_df[col]
+        .astype(np.float64)
+        .interpolate(method="linear", limit_direction="both")
+        .bfill()
+        .ffill()
+        .to_numpy(dtype=np.float64)
         for col in y_df.columns
     ]
 
     point, quantiles = _model().forecast(inputs=inputs, horizon=prediction_length)
     # point:     (n_cols, prediction_length)
     # quantiles: (n_cols, prediction_length, 10)
+    # Quantile channels are [mean, q0.1, q0.2, ..., q0.9] — index 0 is the mean
+    # (NOT q0.1), index 5 is the median, index 9 is q0.9.
+    _Q10, _Q90 = 1, 9
 
     is_string_x = (
         pd.api.types.is_string_dtype(x_series)
@@ -82,8 +99,8 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
             row["x_auto_converted"] = future_x[i]
         for j, col in enumerate(y_df.columns):
             row[col]          = float(point[j, i])
-            row[f"{col}_q10"] = float(quantiles[j, i, 0])
-            row[f"{col}_q90"] = float(quantiles[j, i, -1])
+            row[f"{col}_q10"] = float(quantiles[j, i, _Q10])
+            row[f"{col}_q90"] = float(quantiles[j, i, _Q90])
         rows.append(row)
 
     return pd.DataFrame(rows)
