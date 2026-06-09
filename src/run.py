@@ -93,11 +93,4 @@ out_path = OUTPUT / "predictions.tsv"
 predictions.to_csv(out_path, sep="\t", index=False)
 print(f"Written {len(predictions)} rows to {out_path}")
 
-if is_string_x:
-    df_annotated = df_full.copy()
-    df_annotated.insert(1, "x_auto_converted", range(1, total_rows + 1))
-    ann_path = OUTPUT / "input_annotated.parquet"
-    df_annotated.to_parquet(ann_path, index=False)
-    print(f"Written {len(df_annotated)} rows to {ann_path}")
-
 print("Done.")

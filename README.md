@@ -25,7 +25,6 @@ Accepts any parquet file with a leading x column and one or more y columns. Each
 | Path | Description |
 |---|---|
 | `/work/output/predictions.tsv` | Forecast results (tab-separated). |
-| `/work/output/input_annotated.parquet` | All input rows plus an `x_auto_converted` column (1…N). Only written when the x column is a string type. |
 
 ### Prediction columns
 
