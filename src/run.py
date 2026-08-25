@@ -7,6 +7,30 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from model import predict, _MAX_PREDICTION_STEPS, _MAX_CONTEXT
 
+
+def _require_config_int(config: dict, key: str, default=None) -> int:
+    """Return a config value only if it is a real JSON integer.
+
+    Args:
+        config: Parsed config dictionary.
+        key: Config key to read.
+        default: Optional default value for missing keys.
+
+    Returns:
+        Integer config value.
+
+    Raises:
+        ValueError: If the value is missing without a default, is a boolean, or
+            is not an integer.
+    """
+    value = config.get(key, default)
+    if value is None:
+        raise ValueError(f"config.json missing required key: '{key}'")
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"config.json key '{key}' must be an integer")
+    return value
+
+
 _work = Path(os.environ["WORK_DIR"]) if "WORK_DIR" in os.environ else Path("./work")
 if "WORK_DIR" not in os.environ and not _work.exists():
     _work = Path("/work")
@@ -26,17 +50,12 @@ except json.JSONDecodeError as exc:
     print(f"ERROR: invalid config.json: {exc}", file=sys.stderr)
     sys.exit(1)
 
-for key in ("history_length", "prediction_length"):
-    if key not in config:
-        print(f"ERROR: config.json missing required key: '{key}'", file=sys.stderr)
-        sys.exit(1)
-
 try:
-    history_length    = int(config["history_length"])
-    prediction_length = int(config["prediction_length"])
-    prediction_offset = int(config.get("prediction_offset", 0))
-except (TypeError, ValueError) as exc:
-    print(f"ERROR: invalid config.json numeric value: {exc}", file=sys.stderr)
+    history_length = _require_config_int(config, "history_length")
+    prediction_length = _require_config_int(config, "prediction_length")
+    prediction_offset = _require_config_int(config, "prediction_offset", default=0)
+except ValueError as exc:
+    print(f"ERROR: {exc}", file=sys.stderr)
     sys.exit(1)
 print(f"Config: history_length={history_length}, prediction_length={prediction_length}, prediction_offset={prediction_offset}")
 

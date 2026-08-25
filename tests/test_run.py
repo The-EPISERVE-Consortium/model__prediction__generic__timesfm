@@ -174,8 +174,28 @@ def test_noninteger_config_exits_with_clear_error(tmp_path):
     result = _run_with_config(tmp_path, {"history_length": "abc", "prediction_length": 1})
 
     assert result.returncode == 1
-    assert "ERROR: invalid config.json numeric value" in result.stderr
+    assert "ERROR: config.json key 'history_length' must be an integer" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("history_length", 40.5),
+        ("prediction_length", "2"),
+        ("prediction_offset", True),
+    ],
+)
+def test_config_integer_fields_reject_non_integer_types(tmp_path, key, value):
+    """Verify integer config fields reject floats, strings, and booleans."""
+    config = {"history_length": 2, "prediction_length": 1, "prediction_offset": 0}
+    config[key] = value
+
+    result = _run_with_config(tmp_path, config)
+
+    assert result.returncode == 1
+    assert f"ERROR: config.json key '{key}' must be an integer" in result.stderr
+    assert "input.parquet not found" not in result.stderr
 
 
 def test_missing_config_reports_resolved_path(tmp_path):
