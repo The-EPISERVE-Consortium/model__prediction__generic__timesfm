@@ -31,10 +31,15 @@ def _mock_forecast(inputs, horizon):
 
 @pytest.fixture(autouse=True)
 def mock_timesfm():
+    """Mock the TimesFM torch backend used by the model.
+
+    Yields:
+        MagicMock: Mocked TimesFM torch backend class.
+    """
     mock_instance = MagicMock()
     mock_instance.forecast.side_effect = _mock_forecast
     model_module._tfm = None
-    with patch("timesfm.TimesFM_2p5_200M_torch") as mock_cls:
+    with patch("timesfm.TimesFM_2p5_200M_torch", create=True) as mock_cls:
         mock_cls.from_pretrained.return_value = mock_instance
         yield mock_cls
     model_module._tfm = None
