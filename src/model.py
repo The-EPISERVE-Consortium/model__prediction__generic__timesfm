@@ -1,3 +1,5 @@
+from datetime import date
+
 import numpy as np
 import pandas as pd
 import timesfm
@@ -45,12 +47,110 @@ def _validate_uniform_step(diffs: pd.Series, kind: str) -> None:
     """
     first_diff = diffs.iloc[0]
     if pd.api.types.is_timedelta64_dtype(diffs):
-        if not (diffs == first_diff).all():
+        diff_ns = diffs.astype("int64").to_numpy(dtype=np.float64)
+        first_diff_ns = float(pd.Timedelta(first_diff).value)
+        if not np.allclose(diff_ns, first_diff_ns):
             raise ValueError(f"{kind} x values must have a uniform step")
         return
 
     if not np.allclose(diffs.to_numpy(dtype=np.float64), float(first_diff)):
         raise ValueError(f"{kind} x values must have a uniform step")
+
+
+def _coerce_datetime_like_x(x_series: pd.Series) -> pd.Series:
+    """Convert object x values to datetime when they are datetime-like objects.
+
+    Args:
+        x_series: Observed x-axis values.
+
+    Returns:
+        Original x series, or a datetime-converted copy when object values are
+        already datetime-like.
+    """
+    if pd.api.types.is_datetime64_any_dtype(x_series):
+        return x_series
+    if not pd.api.types.is_object_dtype(x_series):
+        return x_series
+
+    values = x_series.dropna()
+    if values.empty:
+        return x_series
+
+    datetime_types = (date, np.datetime64, pd.Timestamp)
+    if values.map(lambda value: isinstance(value, datetime_types)).all():
+        return pd.Series(pd.to_datetime(x_series), name=x_series.name)
+
+    return x_series
+
+
+def _datetime_step(x_series: pd.Series):
+    """Infer the datetime step from a validated datetime x series.
+
+    Args:
+        x_series: Datetime x-axis values.
+
+    Returns:
+        Date offset or timedelta used to extrapolate future timestamps.
+
+    Raises:
+        ValueError: If the datetime values do not have an inferable calendar
+            frequency or uniform timedelta step.
+    """
+    freq = pd.infer_freq(pd.DatetimeIndex(x_series))
+    if freq is not None:
+        return pd.tseries.frequencies.to_offset(freq)
+
+    diffs = x_series.diff().dropna()
+    _validate_uniform_step(diffs, "datetime")
+    return diffs.iloc[0]
+
+
+def _validate_numeric_y(y_df: pd.DataFrame) -> None:
+    """Validate that all y columns have numeric dtypes.
+
+    Args:
+        y_df: DataFrame of y columns to forecast.
+
+    Raises:
+        ValueError: If any y column is not numeric.
+    """
+    non_numeric_cols = [
+        col for col in y_df.columns
+        if not pd.api.types.is_numeric_dtype(y_df[col])
+    ]
+    if non_numeric_cols:
+        raise ValueError(
+            "y columns must be numeric: " + ", ".join(map(str, non_numeric_cols))
+        )
+
+
+def _validate_forecast_shapes(point, quantiles, prediction_length: int, n_cols: int) -> None:
+    """Validate model forecast array shapes before reading fixed channels.
+
+    Args:
+        point: Point forecast array returned by TimesFM.
+        quantiles: Quantile forecast array returned by TimesFM.
+        prediction_length: Expected forecast horizon.
+        n_cols: Expected number of independent y series.
+
+    Raises:
+        ValueError: If forecast outputs do not have the expected dimensions.
+    """
+    if point.shape != (n_cols, prediction_length):
+        raise ValueError(
+            "TimesFM point forecast has unexpected shape: "
+            f"{point.shape}; expected {(n_cols, prediction_length)}"
+        )
+    if quantiles.ndim != 3 or quantiles.shape[:2] != (n_cols, prediction_length):
+        raise ValueError(
+            "TimesFM quantile forecast has unexpected shape: "
+            f"{quantiles.shape}; expected ({n_cols}, {prediction_length}, channels)"
+        )
+    if quantiles.shape[2] != 10:
+        raise ValueError(
+            "TimesFM quantile forecast must have 10 channels ordered "
+            "[mean, q0.1, ..., q0.9]"
+        )
 
 
 def _model():
@@ -92,11 +192,11 @@ def _extrapolate_x(x_series: pd.Series, n: int) -> list:
     if len(x_series) < 2:
         raise ValueError("x_series must contain at least 2 values to infer step size")
 
+    x_series = _coerce_datetime_like_x(x_series)
+
     if pd.api.types.is_datetime64_any_dtype(x_series):
         _validate_ordered_x(x_series, "datetime")
-        diffs = x_series.diff().dropna()
-        _validate_uniform_step(diffs, "datetime")
-        step = diffs.iloc[0]
+        step = _datetime_step(x_series)
         last = x_series.iloc[-1]
         return [last + step * (i + 1) for i in range(n)]
 
@@ -142,6 +242,8 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
             f"prediction_length={prediction_length} exceeds max {_MAX_PREDICTION_STEPS} steps"
         )
 
+    x_series = _coerce_datetime_like_x(x_series)
+    _validate_numeric_y(y_df)
     numeric_y = y_df.astype(np.float64)
     all_nan_cols = numeric_y.columns[numeric_y.isna().all()].tolist()
     if all_nan_cols:
@@ -169,6 +271,7 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
     future_x = _extrapolate_x(x_series, prediction_length)
 
     point, quantiles = _model().forecast(inputs=inputs, horizon=prediction_length)
+    _validate_forecast_shapes(point, quantiles, prediction_length, len(y_df.columns))
     # point:     (n_cols, prediction_length)
     # quantiles: (n_cols, prediction_length, 10)
     # Quantile channels are [mean, q0.1, q0.2, ..., q0.9] — index 0 is the mean

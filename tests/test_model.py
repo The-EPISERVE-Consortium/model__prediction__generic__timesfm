@@ -1,5 +1,7 @@
 import sys
 import types
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -99,6 +101,18 @@ def test_x_extrapolation_weekly():
         assert row.date == last + pd.Timedelta(weeks=i)
 
 
+def test_x_extrapolation_daily_across_dst():
+    """Use calendar daily frequency across DST transitions."""
+    x = pd.Series(
+        pd.date_range("2022-03-26", periods=4, freq="D", tz="Europe/Berlin"),
+        name="date",
+    )
+    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0, 4.0]})
+    result = predict(x, y, prediction_length=2)
+    expected = pd.date_range("2022-03-30", periods=2, freq="D", tz="Europe/Berlin")
+    assert list(result["date"]) == list(expected)
+
+
 def test_x_extrapolation_numeric():
     n = 50
     x = pd.Series(np.arange(n, dtype=float), name="x")
@@ -147,6 +161,27 @@ def test_x_non_string_column_has_no_auto_converted():
     assert "x_auto_converted" not in result.columns
 
 
+def test_object_datetime_x_extrapolates_as_datetime():
+    """Treat object columns containing datetime values as datetime x values."""
+    x = pd.Series(
+        [
+            datetime(2022, 1, 1),
+            datetime(2022, 1, 2),
+            datetime(2022, 1, 3),
+        ],
+        dtype=object,
+        name="date",
+    )
+    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    result = predict(x, y, prediction_length=2)
+
+    assert "x_auto_converted" not in result.columns
+    assert list(result["date"]) == [
+        pd.Timestamp("2022-01-04"),
+        pd.Timestamp("2022-01-05"),
+    ]
+
+
 def test_exceeds_max_raises():
     x, y = _make_xy()
     with pytest.raises(ValueError, match="exceeds max"):
@@ -167,6 +202,14 @@ def test_all_nan_column_raises_clear_error():
     y["empty"] = np.nan
     with pytest.raises(ValueError, match="empty"):
         predict(x, y, prediction_length=3)
+
+
+def test_non_numeric_y_column_raises_clear_error():
+    """Reject non-numeric y columns with the column name."""
+    x = pd.Series([1.0, 2.0, 3.0], name="x")
+    y = pd.DataFrame({"cases": ["low", "medium", "high"]})
+    with pytest.raises(ValueError, match="cases"):
+        predict(x, y, prediction_length=2)
 
 
 def test_duplicate_string_x_raises_clear_error():
@@ -240,6 +283,19 @@ def test_missing_x_name_defaults_to_x_column():
     result = predict(x, y, prediction_length=2)
     assert list(result.columns) == ["x", "cases", "cases_q10", "cases_q90"]
     assert list(result["x"]) == [4.0, 5.0]
+
+
+def test_unexpected_quantile_channel_count_raises(mock_timesfm):
+    """Reject TimesFM quantile output with an unexpected channel count."""
+    mock_instance = mock_timesfm.from_pretrained.return_value
+    mock_instance.forecast.side_effect = lambda inputs, horizon: (
+        np.full((len(inputs), horizon), 45.0),
+        np.zeros((len(inputs), horizon, 9)),
+    )
+    x, y = _make_xy(y_cols=("cases",))
+
+    with pytest.raises(ValueError, match="10 channels"):
+        predict(x, y, prediction_length=2)
 
 
 def test_model_loaded_once(mock_timesfm):
