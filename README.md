@@ -14,9 +14,9 @@ Accepts any parquet file with a leading x column and one or more y columns. Each
 ### Input parquet rules
 
 - First column: x values. Supported types:
-  - **datetime** — step size is inferred from the median diff; future x values are extrapolated accordingly
+  - **datetime** — values must be unique, monotonic, and evenly spaced; future x values are extrapolated from that step
   - **numeric** — same as datetime
-  - **string** — rows are taken as-is (no sorting, no date parsing); a synthetic integer position column `x_auto_converted` is added to the output for alignment
+  - **string** — values must be unique and monotonic; rows are taken as-is (no sorting, no date parsing), the output x column is replaced with integer positions, and a matching `x_auto_converted` column is added for alignment
 - Remaining columns: one y series each, treated independently
 - Must have at least 2 columns and enough rows to satisfy `history_length + prediction_offset`
 
@@ -32,7 +32,7 @@ For each y column `col` in the input:
 
 | Column | Description |
 |---|---|
-| `<x_col>` | Extrapolated x value for this forecast step |
+| `<x_col>` | Extrapolated x value for this forecast step; for string x input, this is the synthetic integer position |
 | `x_auto_converted` | Integer position (only present when x column is a string type) |
 | `col` | Point forecast |
 | `col_q10` | 10th percentile |

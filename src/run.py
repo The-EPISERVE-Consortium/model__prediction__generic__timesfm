@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import pandas as pd
 from pathlib import Path
@@ -6,30 +7,41 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from model import predict, _MAX_PREDICTION_STEPS, _MAX_CONTEXT
 
-_work  = Path("./work") if Path("./work").exists() else Path("/work")
+_work = Path(os.environ["WORK_DIR"]) if "WORK_DIR" in os.environ else Path("./work")
+if "WORK_DIR" not in os.environ and not _work.exists():
+    _work = Path("/work")
+_work = _work.resolve()
 INPUT  = _work / "input"
 OUTPUT = _work / "output"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 config_path = INPUT / "config.json"
 if not config_path.exists():
-    print("ERROR: /work/input/config.json not found", file=sys.stderr)
+    print(f"ERROR: {config_path} not found", file=sys.stderr)
     sys.exit(1)
 
-config = json.loads(config_path.read_text())
+try:
+    config = json.loads(config_path.read_text())
+except json.JSONDecodeError as exc:
+    print(f"ERROR: invalid config.json: {exc}", file=sys.stderr)
+    sys.exit(1)
 
 for key in ("history_length", "prediction_length"):
     if key not in config:
         print(f"ERROR: config.json missing required key: '{key}'", file=sys.stderr)
         sys.exit(1)
 
-history_length    = int(config["history_length"])
-prediction_length = int(config["prediction_length"])
-prediction_offset = int(config.get("prediction_offset", 0))
+try:
+    history_length    = int(config["history_length"])
+    prediction_length = int(config["prediction_length"])
+    prediction_offset = int(config.get("prediction_offset", 0))
+except (TypeError, ValueError) as exc:
+    print(f"ERROR: invalid config.json numeric value: {exc}", file=sys.stderr)
+    sys.exit(1)
 print(f"Config: history_length={history_length}, prediction_length={prediction_length}, prediction_offset={prediction_offset}")
 
-if history_length <= 0:
-    print("ERROR: history_length must be > 0", file=sys.stderr)
+if history_length < 2:
+    print("ERROR: history_length must be >= 2", file=sys.stderr)
     sys.exit(1)
 
 if prediction_length <= 0:
@@ -57,7 +69,7 @@ if history_length > _MAX_CONTEXT:
 # ── Data ──────────────────────────────────────────────────────────────────────
 data_path = INPUT / "input.parquet"
 if not data_path.exists():
-    print("ERROR: /work/input/input.parquet not found", file=sys.stderr)
+    print(f"ERROR: {data_path} not found", file=sys.stderr)
     sys.exit(1)
 
 df_full = pd.read_parquet(data_path)
