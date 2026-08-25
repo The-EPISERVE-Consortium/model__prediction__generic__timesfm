@@ -1,9 +1,16 @@
 import sys
+import types
 import numpy as np
 import pandas as pd
 import pytest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
+
+if "timesfm" not in sys.modules:
+    timesfm_stub = types.ModuleType("timesfm")
+    timesfm_stub.ForecastConfig = MagicMock()
+    timesfm_stub.TimesFM_2p5_200M_torch = MagicMock()
+    sys.modules["timesfm"] = timesfm_stub
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import model as model_module
@@ -11,6 +18,16 @@ from model import predict, _MAX_PREDICTION_STEPS
 
 
 def _make_xy(n=100, y_cols=("a", "b"), freq="D"):
+    """Create sample x/y forecast inputs.
+
+    Args:
+        n: Number of rows to create.
+        y_cols: Names of y columns to include.
+        freq: Pandas frequency string for the x column.
+
+    Returns:
+        Tuple of x series and y DataFrame.
+    """
     dates = pd.date_range("2022-01-01", periods=n, freq=freq)
     x_series = pd.Series(dates, name="date")
     y_df = pd.DataFrame({col: np.random.rand(n) * 50 + 10 for col in y_cols})
@@ -18,6 +35,15 @@ def _make_xy(n=100, y_cols=("a", "b"), freq="D"):
 
 
 def _mock_forecast(inputs, horizon):
+    """Return deterministic forecast arrays for tests.
+
+    Args:
+        inputs: Model input arrays.
+        horizon: Number of forecast steps.
+
+    Returns:
+        Tuple containing point forecasts and quantile forecasts.
+    """
     batch = len(inputs)
     point = np.full((batch, horizon), 45.0)
     # Channels are [mean, q0.1, q0.2, ..., q0.9]: index 0 is the mean, index 1
@@ -125,6 +151,38 @@ def test_exceeds_max_raises():
     x, y = _make_xy()
     with pytest.raises(ValueError, match="exceeds max"):
         predict(x, y, prediction_length=_MAX_PREDICTION_STEPS + 1)
+
+
+@pytest.mark.parametrize("prediction_length", [0, -1])
+def test_prediction_length_must_be_positive(prediction_length):
+    """Reject zero and negative forecast horizons."""
+    x, y = _make_xy()
+    with pytest.raises(ValueError, match="prediction_length must be > 0"):
+        predict(x, y, prediction_length=prediction_length)
+
+
+def test_all_nan_column_raises_clear_error():
+    """Reject y columns that contain only NaN values."""
+    x, y = _make_xy(y_cols=("good", "empty"))
+    y["empty"] = np.nan
+    with pytest.raises(ValueError, match="empty"):
+        predict(x, y, prediction_length=3)
+
+
+def test_duplicate_string_x_raises_clear_error():
+    """Reject duplicate string x labels before forecasting."""
+    x = pd.Series(["2022-W01", "2022-W01", "2022-W02"], name="week")
+    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    with pytest.raises(ValueError, match="unique"):
+        predict(x, y, prediction_length=2)
+
+
+def test_nonmonotonic_string_x_raises_clear_error():
+    """Reject out-of-order string x labels before forecasting."""
+    x = pd.Series(["2022-W01", "2022-W03", "2022-W02"], name="week")
+    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    with pytest.raises(ValueError, match="monotonic"):
+        predict(x, y, prediction_length=2)
 
 
 def test_model_loaded_once(mock_timesfm):

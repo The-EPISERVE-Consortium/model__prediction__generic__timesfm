@@ -28,6 +28,14 @@ prediction_length = int(config["prediction_length"])
 prediction_offset = int(config.get("prediction_offset", 0))
 print(f"Config: history_length={history_length}, prediction_length={prediction_length}, prediction_offset={prediction_offset}")
 
+if history_length <= 0:
+    print("ERROR: history_length must be > 0", file=sys.stderr)
+    sys.exit(1)
+
+if prediction_length <= 0:
+    print("ERROR: prediction_length must be > 0", file=sys.stderr)
+    sys.exit(1)
+
 if prediction_length > _MAX_PREDICTION_STEPS:
     print(
         f"ERROR: prediction_length={prediction_length} exceeds max {_MAX_PREDICTION_STEPS} steps",
@@ -86,7 +94,11 @@ print(f"x column: {x_col!r}, y columns: {y_cols}")
 print(f"Using rows {start_idx}–{end_idx - 1} ({x_series.iloc[0]} – {x_series.iloc[-1]})")
 
 # ── Predict ───────────────────────────────────────────────────────────────────
-predictions = predict(x_series, y_df, prediction_length)
+try:
+    predictions = predict(x_series, y_df, prediction_length)
+except ValueError as exc:
+    print(f"ERROR: {exc}", file=sys.stderr)
+    sys.exit(1)
 
 # ── Fix x_auto_converted to absolute positions ────────────────────────────────
 if is_string_x and "x_auto_converted" in predictions.columns:

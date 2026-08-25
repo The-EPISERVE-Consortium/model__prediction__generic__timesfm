@@ -15,6 +15,11 @@ _MAX_CONTEXT = 2048
 
 
 def _model():
+    """Return the cached TimesFM model instance.
+
+    Returns:
+        timesfm.TimesFM: Compiled TimesFM model instance.
+    """
     global _tfm
     if _tfm is None:
         tfm = timesfm.TimesFM_2p5_200M_torch.from_pretrained(
@@ -31,7 +36,19 @@ def _model():
 
 
 def _extrapolate_x(x_series: pd.Series, n: int) -> list:
-    """Return n future x values extrapolated from x_series."""
+    """Return future x values extrapolated from the observed x series.
+
+    Args:
+        x_series: Observed x-axis values.
+        n: Number of future values to generate.
+
+    Returns:
+        Future x-axis values.
+
+    Raises:
+        ValueError: If fewer than two x values are provided or string x values
+            are duplicated or not monotonic increasing.
+    """
     if len(x_series) < 2:
         raise ValueError("x_series must contain at least 2 values to infer step size")
 
@@ -41,6 +58,10 @@ def _extrapolate_x(x_series: pd.Series, n: int) -> list:
         return [last + step * (i + 1) for i in range(n)]
 
     if pd.api.types.is_string_dtype(x_series) or pd.api.types.is_object_dtype(x_series):
+        if not x_series.is_unique:
+            raise ValueError("string x values must be unique")
+        if not x_series.is_monotonic_increasing:
+            raise ValueError("string x values must be monotonic increasing")
         # String x: rows are already ordered by the string column; future positions
         # continue the integer sequence (len+1, len+2, ...).
         base = len(x_series)
@@ -53,25 +74,44 @@ def _extrapolate_x(x_series: pd.Series, n: int) -> list:
 
 
 def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> pd.DataFrame:
-    """
-    x_series:          pd.Series of x values (datetime, numeric, or ISO-week string).
-    y_df:              pd.DataFrame where each column is an independent time series to forecast.
-    prediction_length: number of steps ahead to predict.
+    """Forecast future values for each y column.
 
-    Returns: DataFrame with one row per predicted step.
-             Columns: x column name + for each y column col: col, col_q10, col_q90.
+    Args:
+        x_series: Series of x values, such as datetime, numeric, or ISO-week
+            strings.
+        y_df: DataFrame where each column is an independent time series to
+            forecast.
+        prediction_length: Number of steps ahead to predict.
+
+    Returns:
+        DataFrame with one row per predicted step. Columns include the x column
+        name and, for each y column, the point forecast plus q10/q90 intervals.
+
+    Raises:
+        ValueError: If prediction_length is outside the supported range, a y
+            column contains only missing values, or x values cannot be
+            extrapolated.
     """
+    if prediction_length <= 0:
+        raise ValueError("prediction_length must be > 0")
     if prediction_length > _MAX_PREDICTION_STEPS:
         raise ValueError(
             f"prediction_length={prediction_length} exceeds max {_MAX_PREDICTION_STEPS} steps"
+        )
+
+    numeric_y = y_df.astype(np.float64)
+    all_nan_cols = numeric_y.columns[numeric_y.isna().all()].tolist()
+    if all_nan_cols:
+        raise ValueError(
+            "y columns must contain at least one non-NaN value: "
+            + ", ".join(map(str, all_nan_cols))
         )
 
     # Missing values are gaps, not zeros — filling with 0.0 injects artificial
     # cliffs that corrupt the model's input normalization. Interpolate interior
     # gaps linearly and carry the nearest value over leading/trailing NaNs.
     inputs = [
-        y_df[col]
-        .astype(np.float64)
+        numeric_y[col]
         .interpolate(method="linear", limit_direction="both")
         .bfill()
         .ffill()
@@ -79,18 +119,18 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
         for col in y_df.columns
     ]
 
+    is_string_x = (
+        pd.api.types.is_string_dtype(x_series)
+        or pd.api.types.is_object_dtype(x_series)
+    )
+    future_x = _extrapolate_x(x_series, prediction_length)
+
     point, quantiles = _model().forecast(inputs=inputs, horizon=prediction_length)
     # point:     (n_cols, prediction_length)
     # quantiles: (n_cols, prediction_length, 10)
     # Quantile channels are [mean, q0.1, q0.2, ..., q0.9] — index 0 is the mean
     # (NOT q0.1), index 5 is the median, index 9 is q0.9.
     _Q10, _Q90 = 1, 9
-
-    is_string_x = (
-        pd.api.types.is_string_dtype(x_series)
-        or pd.api.types.is_object_dtype(x_series)
-    )
-    future_x = _extrapolate_x(x_series, prediction_length)
 
     rows = []
     for i in range(prediction_length):
