@@ -16,8 +16,10 @@ Accepts any parquet file with a leading x column and one or more y columns. Each
 - First column: x values. Supported types:
   - **datetime** — values must be unique, monotonic, and evenly spaced; future x values are extrapolated from that step
   - **numeric** — same as datetime
+  - **timedelta** — same as numeric
   - **string** — values must be unique and monotonic; rows are taken as-is (no sorting, no date parsing), the output x column is replaced with integer positions, and a matching `x_auto_converted` column is added for alignment
 - Remaining columns: one y series each, treated independently
+- Missing y values are interpolated only across gaps of up to 8 consecutive rows; longer gaps are rejected
 - Must have at least 2 columns and enough rows to satisfy `history_length + prediction_offset`
 
 ## Output

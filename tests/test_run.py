@@ -4,10 +4,71 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+TIMESFM_STUB = """
+import numpy as np
+
+
+class ForecastConfig:
+    \"\"\"Stub TimesFM forecast config.\"\"\"
+
+    def __init__(self, **kwargs):
+        \"\"\"Store config keyword arguments.
+
+        Args:
+            **kwargs: Forecast config options.
+        \"\"\"
+        self.kwargs = kwargs
+
+
+class _TimesFM:
+    \"\"\"Stub TimesFM model.\"\"\"
+
+    def compile(self, config):
+        \"\"\"Store the compile config.
+
+        Args:
+            config: Forecast config object.
+        \"\"\"
+        self.config = config
+
+    def forecast(self, inputs, horizon):
+        \"\"\"Return deterministic point and quantile forecasts.
+
+        Args:
+            inputs: Forecast input arrays.
+            horizon: Forecast horizon.
+
+        Returns:
+            Tuple of point and quantile forecast arrays.
+        \"\"\"
+        batch = len(inputs)
+        point = np.full((batch, horizon), 45.0)
+        quantiles = np.zeros((batch, horizon, 10))
+        quantiles[..., 1] = 30.0
+        quantiles[..., 9] = 60.0
+        return point, quantiles
+
+
+class TimesFM_2p5_200M_torch:
+    \"\"\"Stub TimesFM torch loader.\"\"\"
+
+    @classmethod
+    def from_pretrained(cls, name):
+        \"\"\"Return a stub TimesFM model.
+
+        Args:
+            name: Model name.
+
+        Returns:
+            Stub TimesFM model.
+        \"\"\"
+        return _TimesFM()
+"""
 
 
 def _run_with_config_text(tmp_path, config_text, work_dir=None):
@@ -23,9 +84,9 @@ def _run_with_config_text(tmp_path, config_text, work_dir=None):
     """
     work_dir = work_dir or tmp_path / "work"
     input_dir = work_dir / "input"
-    input_dir.mkdir(parents=True)
+    input_dir.mkdir(parents=True, exist_ok=True)
     (input_dir / "config.json").write_text(config_text)
-    (tmp_path / "timesfm.py").write_text("")
+    (tmp_path / "timesfm.py").write_text(TIMESFM_STUB)
 
     env = os.environ.copy()
     env["PYTHONPATH"] = str(tmp_path)
@@ -65,7 +126,7 @@ def _run_without_config(tmp_path, work_dir):
     Returns:
         Completed subprocess result for the CLI invocation.
     """
-    (tmp_path / "timesfm.py").write_text("")
+    (tmp_path / "timesfm.py").write_text(TIMESFM_STUB)
     env = os.environ.copy()
     env["PYTHONPATH"] = str(tmp_path)
     env["WORK_DIR"] = str(work_dir)
@@ -137,3 +198,27 @@ def test_missing_input_reports_resolved_path(tmp_path):
 
     assert result.returncode == 1
     assert f"{work_dir.resolve()}/input/input.parquet not found" in result.stderr
+
+
+def test_string_x_prediction_offset_writes_absolute_positions(tmp_path):
+    """Verify string x output positions are shifted to absolute row positions."""
+    work_dir = tmp_path / "work"
+    input_dir = work_dir / "input"
+    input_dir.mkdir(parents=True)
+    pd.DataFrame(
+        {
+            "week": [f"2022-W{i:02d}" for i in range(1, 7)],
+            "cases": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0],
+        }
+    ).to_parquet(input_dir / "input.parquet")
+
+    result = _run_with_config(
+        tmp_path,
+        {"history_length": 3, "prediction_length": 2, "prediction_offset": 2},
+        work_dir=work_dir,
+    )
+
+    assert result.returncode == 0, result.stderr
+    output = pd.read_csv(work_dir / "output" / "predictions.tsv", sep="\t")
+    assert list(output["week"]) == [5, 6]
+    assert list(output["x_auto_converted"]) == [5, 6]

@@ -122,6 +122,18 @@ def test_x_extrapolation_numeric():
         assert row.x == pytest.approx(n - 1 + i)
 
 
+def test_x_extrapolation_timedelta_microseconds():
+    """Extrapolate uniform non-ns timedelta x values."""
+    x = pd.Series(np.array([0, 1000, 2000], dtype="timedelta64[us]"), name="delta")
+    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    result = predict(x, y, prediction_length=2)
+    expected = [
+        pd.Timedelta(microseconds=3000),
+        pd.Timedelta(microseconds=4000),
+    ]
+    assert list(result["delta"]) == expected
+
+
 def test_single_y_column():
     x, y = _make_xy(y_cols=("value",))
     result = predict(x, y, prediction_length=5)
@@ -202,6 +214,14 @@ def test_all_nan_column_raises_clear_error():
     y["empty"] = np.nan
     with pytest.raises(ValueError, match="empty"):
         predict(x, y, prediction_length=3)
+
+
+def test_long_nan_gap_raises_clear_error():
+    """Reject y columns with long consecutive NaN gaps."""
+    x = pd.Series(np.arange(12, dtype=float), name="x")
+    y = pd.DataFrame({"cases": [1.0] + [np.nan] * 9 + [11.0, 12.0]})
+    with pytest.raises(ValueError, match="cases .*9"):
+        predict(x, y, prediction_length=2)
 
 
 def test_non_numeric_y_column_raises_clear_error():

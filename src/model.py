@@ -15,6 +15,10 @@ _MAX_PREDICTION_STEPS = 512
 # recent _MAX_CONTEXT points by the model.
 _MAX_CONTEXT = 2048
 
+# Max consecutive missing y values to bridge before forecasting. Longer gaps are
+# treated as too sparse to fabricate safely.
+_MAX_INTERPOLATION_GAP = 8
+
 
 def _validate_ordered_x(x_series: pd.Series, kind: str) -> None:
     """Validate x values that must represent an ordered series.
@@ -47,7 +51,7 @@ def _validate_uniform_step(diffs: pd.Series, kind: str) -> None:
     """
     first_diff = diffs.iloc[0]
     if pd.api.types.is_timedelta64_dtype(diffs):
-        diff_ns = diffs.astype("int64").to_numpy(dtype=np.float64)
+        diff_ns = diffs.map(lambda value: pd.Timedelta(value).value).to_numpy(dtype=np.float64)
         first_diff_ns = float(pd.Timedelta(first_diff).value)
         if not np.allclose(diff_ns, first_diff_ns):
             raise ValueError(f"{kind} x values must have a uniform step")
@@ -124,6 +128,49 @@ def _validate_numeric_y(y_df: pd.DataFrame) -> None:
         )
 
 
+def _longest_nan_run(series: pd.Series) -> int:
+    """Return the longest consecutive NaN run in a series.
+
+    Args:
+        series: Series to inspect for missing values.
+
+    Returns:
+        Length of the longest consecutive run of missing values.
+    """
+    longest = 0
+    current = 0
+    for is_missing in series.isna():
+        if is_missing:
+            current += 1
+            longest = max(longest, current)
+        else:
+            current = 0
+    return longest
+
+
+def _validate_interpolation_gaps(y_df: pd.DataFrame) -> None:
+    """Validate that y columns do not contain long missing runs.
+
+    Args:
+        y_df: Numeric y DataFrame to inspect.
+
+    Raises:
+        ValueError: If any y column has a consecutive NaN run longer than the
+            supported interpolation limit.
+    """
+    long_gap_cols = [
+        f"{col} ({_longest_nan_run(y_df[col])})"
+        for col in y_df.columns
+        if _longest_nan_run(y_df[col]) > _MAX_INTERPOLATION_GAP
+    ]
+    if long_gap_cols:
+        raise ValueError(
+            "y columns contain NaN gaps longer than "
+            f"{_MAX_INTERPOLATION_GAP} consecutive values: "
+            + ", ".join(long_gap_cols)
+        )
+
+
 def _validate_forecast_shapes(point, quantiles, prediction_length: int, n_cols: int) -> None:
     """Validate model forecast array shapes before reading fixed channels.
 
@@ -186,8 +233,8 @@ def _extrapolate_x(x_series: pd.Series, n: int) -> list:
 
     Raises:
         ValueError: If fewer than two x values are provided, x values are
-            missing, duplicated, non-monotonic, or datetime/numeric values do not
-            have a uniform step.
+            missing, duplicated, non-monotonic, or datetime/numeric/timedelta
+            values do not have a uniform step.
     """
     if len(x_series) < 2:
         raise ValueError("x_series must contain at least 2 values to infer step size")
@@ -197,6 +244,14 @@ def _extrapolate_x(x_series: pd.Series, n: int) -> list:
     if pd.api.types.is_datetime64_any_dtype(x_series):
         _validate_ordered_x(x_series, "datetime")
         step = _datetime_step(x_series)
+        last = x_series.iloc[-1]
+        return [last + step * (i + 1) for i in range(n)]
+
+    if pd.api.types.is_timedelta64_dtype(x_series):
+        _validate_ordered_x(x_series, "timedelta")
+        diffs = x_series.diff().dropna()
+        _validate_uniform_step(diffs, "timedelta")
+        step = diffs.iloc[0]
         last = x_series.iloc[-1]
         return [last + step * (i + 1) for i in range(n)]
 
@@ -220,8 +275,8 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
     """Forecast future values for each y column.
 
     Args:
-        x_series: Series of x values, such as datetime, numeric, or ISO-week
-            strings.
+        x_series: Series of x values, such as datetime, numeric, timedelta, or
+            ISO-week strings.
         y_df: DataFrame where each column is an independent time series to
             forecast.
         prediction_length: Number of steps ahead to predict.
@@ -232,7 +287,7 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
 
     Raises:
         ValueError: If prediction_length is outside the supported range, a y
-            column contains only missing values, or x values cannot be
+            column contains invalid missing values, or x values cannot be
             extrapolated.
     """
     if prediction_length <= 0:
@@ -251,13 +306,18 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
             "y columns must contain at least one non-NaN value: "
             + ", ".join(map(str, all_nan_cols))
         )
+    _validate_interpolation_gaps(numeric_y)
 
     # Missing values are gaps, not zeros — filling with 0.0 injects artificial
     # cliffs that corrupt the model's input normalization. Interpolate interior
     # gaps linearly and carry the nearest value over leading/trailing NaNs.
     inputs = [
         numeric_y[col]
-        .interpolate(method="linear", limit_direction="both")
+        .interpolate(
+            method="linear",
+            limit=_MAX_INTERPOLATION_GAP,
+            limit_direction="both",
+        )
         .bfill()
         .ffill()
         .to_numpy(dtype=np.float64)
