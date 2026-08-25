@@ -185,6 +185,63 @@ def test_nonmonotonic_string_x_raises_clear_error():
         predict(x, y, prediction_length=2)
 
 
+def test_duplicate_numeric_x_raises_clear_error():
+    """Reject duplicate numeric x values before forecasting."""
+    x = pd.Series([1.0, 1.0, 2.0], name="x")
+    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    with pytest.raises(ValueError, match="unique"):
+        predict(x, y, prediction_length=2)
+
+
+def test_nonmonotonic_numeric_x_raises_clear_error():
+    """Reject out-of-order numeric x values before forecasting."""
+    x = pd.Series([5.0, 1.0, 2.0, 3.0, 4.0], name="x")
+    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    with pytest.raises(ValueError, match="monotonic"):
+        predict(x, y, prediction_length=2)
+
+
+def test_nan_numeric_x_raises_clear_error():
+    """Reject missing numeric x values before forecasting."""
+    x = pd.Series([1.0, np.nan, 3.0], name="x")
+    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    with pytest.raises(ValueError, match="NaN"):
+        predict(x, y, prediction_length=2)
+
+
+def test_irregular_numeric_x_raises_clear_error():
+    """Reject numeric x values that do not have a uniform step."""
+    x = pd.Series([1.0, 2.0, 4.0], name="x")
+    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    with pytest.raises(ValueError, match="uniform step"):
+        predict(x, y, prediction_length=2)
+
+
+def test_duplicate_datetime_x_raises_clear_error():
+    """Reject duplicate datetime x values before forecasting."""
+    x = pd.Series(pd.to_datetime(["2022-01-01", "2022-01-01", "2022-01-02"]), name="date")
+    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    with pytest.raises(ValueError, match="unique"):
+        predict(x, y, prediction_length=2)
+
+
+def test_irregular_datetime_x_raises_clear_error():
+    """Reject datetime x values that do not have a uniform step."""
+    x = pd.Series(pd.to_datetime(["2022-01-01", "2022-01-02", "2022-01-04"]), name="date")
+    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    with pytest.raises(ValueError, match="uniform step"):
+        predict(x, y, prediction_length=2)
+
+
+def test_missing_x_name_defaults_to_x_column():
+    """Use a stable x column name when x_series has no name."""
+    x = pd.Series([1.0, 2.0, 3.0], name=None)
+    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    result = predict(x, y, prediction_length=2)
+    assert list(result.columns) == ["x", "cases", "cases_q10", "cases_q90"]
+    assert list(result["x"]) == [4.0, 5.0]
+
+
 def test_model_loaded_once(mock_timesfm):
     x, y = _make_xy()
     predict(x, y, prediction_length=4)

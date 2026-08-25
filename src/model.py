@@ -14,6 +14,45 @@ _MAX_PREDICTION_STEPS = 512
 _MAX_CONTEXT = 2048
 
 
+def _validate_ordered_x(x_series: pd.Series, kind: str) -> None:
+    """Validate x values that must represent an ordered series.
+
+    Args:
+        x_series: Observed x-axis values.
+        kind: Human-readable x-axis kind for error messages.
+
+    Raises:
+        ValueError: If x values contain missing, duplicate, or non-monotonic
+            entries.
+    """
+    if x_series.isna().any():
+        raise ValueError(f"{kind} x values must not contain NaN")
+    if not x_series.is_unique:
+        raise ValueError(f"{kind} x values must be unique")
+    if not x_series.is_monotonic_increasing:
+        raise ValueError(f"{kind} x values must be monotonic increasing")
+
+
+def _validate_uniform_step(diffs: pd.Series, kind: str) -> None:
+    """Validate that x-axis diffs have a consistent positive step.
+
+    Args:
+        diffs: Consecutive differences between x-axis values.
+        kind: Human-readable x-axis kind for error messages.
+
+    Raises:
+        ValueError: If diffs are not positive and uniform.
+    """
+    first_diff = diffs.iloc[0]
+    if pd.api.types.is_timedelta64_dtype(diffs):
+        if not (diffs == first_diff).all():
+            raise ValueError(f"{kind} x values must have a uniform step")
+        return
+
+    if not np.allclose(diffs.to_numpy(dtype=np.float64), float(first_diff)):
+        raise ValueError(f"{kind} x values must have a uniform step")
+
+
 def _model():
     """Return the cached TimesFM model instance.
 
@@ -46,29 +85,33 @@ def _extrapolate_x(x_series: pd.Series, n: int) -> list:
         Future x-axis values.
 
     Raises:
-        ValueError: If fewer than two x values are provided or string x values
-            are duplicated or not monotonic increasing.
+        ValueError: If fewer than two x values are provided, x values are
+            missing, duplicated, non-monotonic, or datetime/numeric values do not
+            have a uniform step.
     """
     if len(x_series) < 2:
         raise ValueError("x_series must contain at least 2 values to infer step size")
 
     if pd.api.types.is_datetime64_any_dtype(x_series):
-        step = x_series.diff().dropna().median()
+        _validate_ordered_x(x_series, "datetime")
+        diffs = x_series.diff().dropna()
+        _validate_uniform_step(diffs, "datetime")
+        step = diffs.iloc[0]
         last = x_series.iloc[-1]
         return [last + step * (i + 1) for i in range(n)]
 
     if pd.api.types.is_string_dtype(x_series) or pd.api.types.is_object_dtype(x_series):
-        if not x_series.is_unique:
-            raise ValueError("string x values must be unique")
-        if not x_series.is_monotonic_increasing:
-            raise ValueError("string x values must be monotonic increasing")
+        _validate_ordered_x(x_series, "string")
         # String x: rows are already ordered by the string column; future positions
         # continue the integer sequence (len+1, len+2, ...).
         base = len(x_series)
         return list(range(base + 1, base + 1 + n))
 
     # numeric
-    step = float(x_series.diff().dropna().median())
+    _validate_ordered_x(x_series, "numeric")
+    diffs = x_series.diff().dropna()
+    _validate_uniform_step(diffs, "numeric")
+    step = float(diffs.iloc[0])
     last = float(x_series.iloc[-1])
     return [last + step * (i + 1) for i in range(n)]
 
@@ -133,8 +176,9 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
     _Q10, _Q90 = 1, 9
 
     rows = []
+    x_name = x_series.name if x_series.name is not None else "x"
     for i in range(prediction_length):
-        row = {x_series.name: future_x[i]}
+        row = {x_name: future_x[i]}
         if is_string_x:
             row["x_auto_converted"] = future_x[i]
         for j, col in enumerate(y_df.columns):
