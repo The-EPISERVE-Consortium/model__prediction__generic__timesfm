@@ -224,6 +224,30 @@ def test_long_nan_gap_raises_clear_error():
         predict(x, y, prediction_length=2)
 
 
+def test_long_leading_nan_run_is_accepted():
+    """Accept a long leading NaN run that .bfill() carries over safely."""
+    x = pd.Series(np.arange(20, dtype=float), name="x")
+    y = pd.DataFrame({"cases": [np.nan] * 9 + list(range(11, 22))})
+    result = predict(x, y, prediction_length=2)
+    assert len(result) == 2
+
+
+def test_long_trailing_nan_run_is_accepted():
+    """Accept a long trailing NaN run that .ffill() carries over safely."""
+    x = pd.Series(np.arange(20, dtype=float), name="x")
+    y = pd.DataFrame({"cases": list(range(1, 12)) + [np.nan] * 9})
+    result = predict(x, y, prediction_length=2)
+    assert len(result) == 2
+
+
+def test_edge_both_sides_valid_interior_gap_still_rejected():
+    """An interior gap longer than the limit is still rejected."""
+    x = pd.Series(np.arange(12, dtype=float), name="x")
+    y = pd.DataFrame({"cases": [1.0] + [np.nan] * 9 + [11.0, 12.0]})
+    with pytest.raises(ValueError, match="cases .*9"):
+        predict(x, y, prediction_length=2)
+
+
 def test_non_numeric_y_column_raises_clear_error():
     """Reject non-numeric y columns with the column name."""
     x = pd.Series([1.0, 2.0, 3.0], name="x")
