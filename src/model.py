@@ -128,19 +128,30 @@ def _validate_numeric_y(y_df: pd.DataFrame) -> None:
         )
 
 
-def _longest_nan_run(series: pd.Series) -> int:
-    """Return the longest consecutive NaN run in a series.
+def _longest_interior_nan_run(series: pd.Series) -> int:
+    """Return the longest consecutive NaN run between the first and last valid
+    values of a series (an interior gap).
+
+    Leading and trailing NaN runs are excluded because `predict()` carries the
+    nearest value over them with `.bfill()/.ffill()` -- any leading/trailing
+    run is recoverable regardless of length. Only gaps bounded by valid values
+    on both sides are limited by the interpolation step.
 
     Args:
         series: Series to inspect for missing values.
 
     Returns:
-        Length of the longest consecutive run of missing values.
+        Length of the longest interior run of missing values.
     """
+    values = series.to_numpy()
+    valid_positions = np.flatnonzero(~pd.isna(values))
+    if len(valid_positions) < 2:
+        return 0
+    first_valid, last_valid = int(valid_positions[0]), int(valid_positions[-1])
     longest = 0
     current = 0
-    for is_missing in series.isna():
-        if is_missing:
+    for i in range(first_valid + 1, last_valid):
+        if pd.isna(values[i]):
             current += 1
             longest = max(longest, current)
         else:
@@ -159,9 +170,9 @@ def _validate_interpolation_gaps(y_df: pd.DataFrame) -> None:
             supported interpolation limit.
     """
     long_gap_cols = [
-        f"{col} ({_longest_nan_run(y_df[col])})"
+        f"{col} ({_longest_interior_nan_run(y_df[col])})"
         for col in y_df.columns
-        if _longest_nan_run(y_df[col]) > _MAX_INTERPOLATION_GAP
+        if _longest_interior_nan_run(y_df[col]) > _MAX_INTERPOLATION_GAP
     ]
     if long_gap_cols:
         raise ValueError(
