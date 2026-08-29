@@ -15,6 +15,12 @@ _MAX_PREDICTION_STEPS = 512
 # recent _MAX_CONTEXT points by the model.
 _MAX_CONTEXT = 2048
 
+# Min history points fed to the model. TimesFM requires a minimum context to
+# produce a forecast; shorter windows (which run.py's `history_length >= 2`
+# check permits) would otherwise reach forecast() and fail with an uncaught
+# non-ValueError. Reject them up front with a descriptive error.
+_MIN_CONTEXT = 3
+
 # Max consecutive missing y values to bridge before forecasting. Longer gaps are
 # treated as too sparse to fabricate safely.
 _MAX_INTERPOLATION_GAP = 8
@@ -82,7 +88,10 @@ def _coerce_datetime_like_x(x_series: pd.Series) -> pd.Series:
 
     datetime_types = (date, np.datetime64, pd.Timestamp)
     if values.map(lambda value: isinstance(value, datetime_types)).all():
-        return pd.Series(pd.to_datetime(x_series), name=x_series.name)
+        # pd.to_datetime on a Series already returns a Series preserving the
+        # name and index; wrapping it again in pd.Series would discard the
+        # caller-provided index for a fresh RangeIndex.
+        return pd.to_datetime(x_series)
 
     return x_series
 
@@ -169,11 +178,11 @@ def _validate_interpolation_gaps(y_df: pd.DataFrame) -> None:
         ValueError: If any y column has a consecutive NaN run longer than the
             supported interpolation limit.
     """
-    long_gap_cols = [
-        f"{col} ({_longest_interior_nan_run(y_df[col])})"
-        for col in y_df.columns
-        if _longest_interior_nan_run(y_df[col]) > _MAX_INTERPOLATION_GAP
-    ]
+    long_gap_cols = []
+    for col in y_df.columns:
+        longest_run = _longest_interior_nan_run(y_df[col])
+        if longest_run > _MAX_INTERPOLATION_GAP:
+            long_gap_cols.append(f"{col} ({longest_run})")
     if long_gap_cols:
         raise ValueError(
             "y columns contain NaN gaps longer than "
@@ -306,6 +315,11 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
     if prediction_length > _MAX_PREDICTION_STEPS:
         raise ValueError(
             f"prediction_length={prediction_length} exceeds max {_MAX_PREDICTION_STEPS} steps"
+        )
+    if len(x_series) < _MIN_CONTEXT:
+        raise ValueError(
+            f"x_series must contain at least {_MIN_CONTEXT} points "
+            f"(got {len(x_series)}) to forecast"
         )
 
     x_series = _coerce_datetime_like_x(x_series)
