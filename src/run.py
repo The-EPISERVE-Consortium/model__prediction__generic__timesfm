@@ -5,7 +5,7 @@ import pandas as pd
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from model import predict, _MAX_PREDICTION_STEPS, _MAX_CONTEXT
+from model import predict, _MAX_PREDICTION_STEPS, _MAX_CONTEXT, _MIN_CONTEXT
 
 
 def _require_config_int(config: dict, key: str, default=None) -> int:
@@ -59,8 +59,12 @@ except ValueError as exc:
     sys.exit(1)
 print(f"Config: history_length={history_length}, prediction_length={prediction_length}, prediction_offset={prediction_offset}")
 
-if history_length < 2:
-    print("ERROR: history_length must be >= 2", file=sys.stderr)
+if history_length < _MIN_CONTEXT:
+    print(
+        f"ERROR: history_length must be >= {_MIN_CONTEXT} "
+        f"(model requires at least {_MIN_CONTEXT} context points)",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 if prediction_length <= 0:
