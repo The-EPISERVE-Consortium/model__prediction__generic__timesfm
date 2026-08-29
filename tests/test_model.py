@@ -200,6 +200,16 @@ def test_exceeds_max_raises():
         predict(x, y, prediction_length=_MAX_PREDICTION_STEPS + 1)
 
 
+def test_too_short_history_raises_clean_error():
+    """Reject too-short history with a clear ValueError before reaching the model."""
+    from model import _MIN_CONTEXT
+
+    x = pd.Series(np.arange(_MIN_CONTEXT - 1, dtype=float), name="x")
+    y = pd.DataFrame({"cases": np.arange(_MIN_CONTEXT - 1, dtype=float)})
+    with pytest.raises(ValueError, match=f"at least {_MIN_CONTEXT} points"):
+        predict(x, y, prediction_length=2)
+
+
 @pytest.mark.parametrize("prediction_length", [0, -1])
 def test_prediction_length_must_be_positive(prediction_length):
     """Reject zero and negative forecast horizons."""
