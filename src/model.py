@@ -96,6 +96,39 @@ def _coerce_datetime_like_x(x_series: pd.Series) -> pd.Series:
     return x_series
 
 
+def _coerce_numeric_like_x(x_series: pd.Series) -> pd.Series:
+    """Convert object x values to a numeric dtype when they are numeric-like.
+
+    A parquet column read as ``object`` (e.g. an int64/float64 column stored
+    without an inferred numeric dtype) still holds numeric values. Treating it as a
+    string would emit synthetic integer positions and silently discard the real numeric
+    x values, changing the meaning of the forecast axis. If the object values all
+    coerce to numbers, upgrade them so they are extrapolated numerically instead.
+
+    Args:
+        x_series: Observed x-axis values.
+
+    Returns:
+        Original x series, or a numeric-converted copy when object values are all
+        numeric-like.
+    """
+    if not pd.api.types.is_object_dtype(x_series):
+        return x_series
+
+    values = x_series.dropna()
+    if values.empty:
+        return x_series
+
+    try:
+        coerced = pd.to_numeric(x_series, errors="raise")
+    except (ValueError, TypeError):
+        # Not numeric-like (e.g. true strings like ISO weeks) — leave as object
+        # so the string branch handles it.
+        return x_series
+
+    return coerced
+
+
 def _datetime_step(x_series: pd.Series):
     """Infer the datetime step from a validated datetime x series.
 
@@ -260,6 +293,7 @@ def _extrapolate_x(x_series: pd.Series, n: int) -> list:
         raise ValueError("x_series must contain at least 2 values to infer step size")
 
     x_series = _coerce_datetime_like_x(x_series)
+    x_series = _coerce_numeric_like_x(x_series)
 
     if pd.api.types.is_datetime64_any_dtype(x_series):
         _validate_ordered_x(x_series, "datetime")
@@ -323,6 +357,7 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
         )
 
     x_series = _coerce_datetime_like_x(x_series)
+    x_series = _coerce_numeric_like_x(x_series)
     _validate_numeric_y(y_df)
     numeric_y = y_df.astype(np.float64)
     all_nan_cols = numeric_y.columns[numeric_y.isna().all()].tolist()

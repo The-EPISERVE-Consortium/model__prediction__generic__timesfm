@@ -194,6 +194,22 @@ def test_object_datetime_x_extrapolates_as_datetime():
     ]
 
 
+def test_object_numeric_x_extrapolates_numerically():
+    """Treat object columns of numeric values as numeric x, not as string.
+
+    A parquet column read as ``object`` (e.g. int64 stored without an inferred
+    numeric dtype) still holds numbers; it must be extrapolated numerically rather
+    than emitted as synthetic integer positions with an ``x_auto_converted`` column.
+    """
+    x = pd.Series(np.array([1.0, 2.0, 3.0, 4.0], dtype=object), name="x")
+    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0, 4.0]})
+
+    result = predict(x, y, prediction_length=2)
+
+    assert "x_auto_converted" not in result.columns
+    assert list(result["x"]) == [5.0, 6.0]
+
+
 def test_exceeds_max_raises():
     x, y = _make_xy()
     with pytest.raises(ValueError, match="exceeds max"):
