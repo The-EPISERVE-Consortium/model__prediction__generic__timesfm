@@ -44,7 +44,7 @@ For each y column `col` in the input:
 
 | Parameter | Required | Default | Description |
 |---|---|---|---|
-| `history_length` | yes | — | Number of rows to use as model context. Taken as the window ending at `total_rows - prediction_offset`. |
+| `history_length` | yes | — | Number of rows to use as model context. Taken as the window ending at `total_rows - prediction_offset`. Must be at least 3 (the model's minimum context). |
 | `prediction_length` | yes | — | Number of steps to forecast ahead. Maximum: 512. |
 | `prediction_offset` | no | `0` | Rows to skip at the end of the input before the history window. Use this to predict over already-known data for back-testing. |
 

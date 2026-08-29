@@ -144,11 +144,12 @@ def _run_without_config(tmp_path, work_dir):
 @pytest.mark.parametrize(
     ("config", "message"),
     [
-        ({"history_length": 0, "prediction_length": 1}, "history_length must be >= 2"),
-        ({"history_length": -1, "prediction_length": 1}, "history_length must be >= 2"),
-        ({"history_length": 1, "prediction_length": 1}, "history_length must be >= 2"),
-        ({"history_length": 2, "prediction_length": 0}, "prediction_length must be > 0"),
-        ({"history_length": 2, "prediction_length": -1}, "prediction_length must be > 0"),
+        ({"history_length": 0, "prediction_length": 1}, "history_length must be >= 3"),
+        ({"history_length": -1, "prediction_length": 1}, "history_length must be >= 3"),
+        ({"history_length": 1, "prediction_length": 1}, "history_length must be >= 3"),
+        ({"history_length": 2, "prediction_length": 1}, "history_length must be >= 3"),
+        ({"history_length": 3, "prediction_length": 0}, "prediction_length must be > 0"),
+        ({"history_length": 3, "prediction_length": -1}, "prediction_length must be > 0"),
     ],
 )
 def test_invalid_lengths_exit_before_loading_data(tmp_path, config, message):
@@ -212,7 +213,7 @@ def test_missing_input_reports_resolved_path(tmp_path):
     work_dir = tmp_path / "custom-work"
     result = _run_with_config(
         tmp_path,
-        {"history_length": 2, "prediction_length": 1},
+        {"history_length": 3, "prediction_length": 1},
         work_dir=work_dir,
     )
 
