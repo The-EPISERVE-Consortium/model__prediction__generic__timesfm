@@ -130,6 +130,13 @@ try:
 except ValueError as exc:
     print(f"ERROR: {exc}", file=sys.stderr)
     sys.exit(1)
+except Exception as exc:
+    # The model layer (TimesFM/torch) can raise non-ValueError exceptions such
+    # as OSError on a failed first-run weight download or RuntimeError on an
+    # OOM/context error. Keep the same clean-error convention as every other
+    # failure path instead of leaking a raw traceback.
+    print(f"ERROR: model failed: {exc}", file=sys.stderr)
+    sys.exit(1)
 
 # ── Fix x_auto_converted to absolute positions ────────────────────────────────
 if is_string_x and "x_auto_converted" in predictions.columns:

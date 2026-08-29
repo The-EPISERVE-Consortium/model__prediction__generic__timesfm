@@ -242,3 +242,42 @@ def test_string_x_prediction_offset_writes_absolute_positions(tmp_path):
     output = pd.read_csv(work_dir / "output" / "predictions.tsv", sep="\t")
     assert list(output["week"]) == [5, 6]
     assert list(output["x_auto_converted"]) == [5, 6]
+
+
+def test_model_runtime_error_exits_cleanly_without_traceback(tmp_path):
+    """Verify a non-ValueError from the model exits cleanly with an ERROR line."""
+    work_dir = tmp_path / "work"
+    input_dir = work_dir / "input"
+    input_dir.mkdir(parents=True)
+    pd.DataFrame(
+        {
+            "week": [f"2022-W{i:02d}" for i in range(1, 7)],
+            "cases": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0],
+        }
+    ).to_parquet(input_dir / "input.parquet")
+    (input_dir / "config.json").write_text(
+        json.dumps({"history_length": 3, "prediction_length": 2})
+    )
+
+    error_stub = TIMESFM_STUB.replace(
+        "return point, quantiles",
+        "raise RuntimeError('simulated model failure')",
+    )
+    (tmp_path / "timesfm.py").write_text(error_stub)
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(tmp_path)
+    env["WORK_DIR"] = str(work_dir)
+
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "src" / "run.py")],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "ERROR: model failed" in result.stderr
+    assert "Traceback" not in result.stderr
