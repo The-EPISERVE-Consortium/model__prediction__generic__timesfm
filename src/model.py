@@ -96,6 +96,44 @@ def _coerce_datetime_like_x(x_series: pd.Series) -> pd.Series:
     return x_series
 
 
+def _coerce_numeric_like_x(x_series: pd.Series) -> pd.Series:
+    """Upgrade an object x column of numeric values to a numeric dtype.
+
+    An object column whose values are actually numbers (e.g. read from parquet
+    with a mixed/object dtype) was previously misclassified as string x, which
+    silently discarded the real numeric axis values in favour of synthetic
+    integer positions. True strings (e.g. ISO-week labels) must stay object so
+    the string branch still applies.
+
+    Args:
+        x_series: Observed x-axis values.
+
+    Returns:
+        The original series, or a numeric-converted copy when every non-NaN
+        object value is numeric.
+    """
+    if pd.api.types.is_numeric_dtype(x_series):
+        return x_series
+    if not pd.api.types.is_object_dtype(x_series):
+        return x_series
+
+    values = x_series.dropna()
+    if values.empty:
+        return x_series
+
+    try:
+        converted = pd.to_numeric(values, errors="raise")
+    except (ValueError, TypeError):
+        # Contains at least one non-numeric value (a real string), so it is
+        # genuinely string x -- leave it as object.
+        return x_series
+
+    if converted.isna().all():
+        return x_series
+    # Rebuild the full series (including any NaN positions) at the numeric dtype.
+    return pd.to_numeric(x_series, errors="coerce")
+
+
 def _datetime_step(x_series: pd.Series):
     """Infer the datetime step from a validated datetime x series.
 
@@ -260,6 +298,7 @@ def _extrapolate_x(x_series: pd.Series, n: int) -> list:
         raise ValueError("x_series must contain at least 2 values to infer step size")
 
     x_series = _coerce_datetime_like_x(x_series)
+    x_series = _coerce_numeric_like_x(x_series)
 
     if pd.api.types.is_datetime64_any_dtype(x_series):
         _validate_ordered_x(x_series, "datetime")
@@ -323,6 +362,7 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
         )
 
     x_series = _coerce_datetime_like_x(x_series)
+    x_series = _coerce_numeric_like_x(x_series)
     _validate_numeric_y(y_df)
     numeric_y = y_df.astype(np.float64)
     all_nan_cols = numeric_y.columns[numeric_y.isna().all()].tolist()

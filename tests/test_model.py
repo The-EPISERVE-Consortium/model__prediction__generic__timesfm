@@ -194,6 +194,18 @@ def test_object_datetime_x_extrapolates_as_datetime():
     ]
 
 
+def test_object_numeric_x_extrapolates_numerically():
+    """Treat object columns containing numeric values as numeric x values."""
+    x = pd.Series([1.0, 2.0, 3.0, 4.0], dtype=object, name="x")
+    y = pd.DataFrame({"cases": [10.0, 11.0, 12.0, 13.0]})
+    result = predict(x, y, prediction_length=2)
+
+    # Numeric axis values must be preserved and extrapolated numerically, not
+    # replaced by synthetic integer positions (which is what string x does).
+    assert "x_auto_converted" not in result.columns
+    assert list(result["x"]) == [5.0, 6.0]
+
+
 def test_exceeds_max_raises():
     x, y = _make_xy()
     with pytest.raises(ValueError, match="exceeds max"):
