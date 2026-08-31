@@ -5,7 +5,7 @@ import pandas as pd
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from model import predict, _MAX_PREDICTION_STEPS, _MAX_CONTEXT
+from model import predict, _MAX_PREDICTION_STEPS, _MAX_CONTEXT, _MIN_CONTEXT
 
 
 def _require_config_int(config: dict, key: str, default=None) -> int:
@@ -59,8 +59,12 @@ except ValueError as exc:
     sys.exit(1)
 print(f"Config: history_length={history_length}, prediction_length={prediction_length}, prediction_offset={prediction_offset}")
 
-if history_length < 2:
-    print("ERROR: history_length must be >= 2", file=sys.stderr)
+if history_length < _MIN_CONTEXT:
+    print(
+        f"ERROR: history_length must be >= {_MIN_CONTEXT} "
+        "(model minimum context for forecasting)",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 if prediction_length <= 0:
@@ -117,6 +121,12 @@ is_string_x = pd.api.types.is_string_dtype(df_full[x_col]) or pd.api.types.is_ob
 
 end_idx   = total_rows - prediction_offset
 start_idx = end_idx - history_length
+if history_length > _MAX_CONTEXT:
+    # The model consumes at most the most recent _MAX_CONTEXT points (see the
+    # WARNING above). Drop the older prefix here so NaN-gap validation and
+    # interpolation inside predict() operate on exactly the window the model
+    # receives, instead of silently relying on TimesFM to truncate internally.
+    start_idx = end_idx - _MAX_CONTEXT
 df = df_full.iloc[start_idx:end_idx].reset_index(drop=True)
 x_series = df[x_col]
 y_df     = df[y_cols]
