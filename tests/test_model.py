@@ -210,6 +210,14 @@ def test_too_short_history_raises_clean_error():
         predict(x, y, prediction_length=2)
 
 
+def test_x_y_length_mismatch_raises_clear_error():
+    """Reject x/y inputs with different row counts before forecasting."""
+    x = pd.Series(np.arange(10, dtype=float), name="x")
+    y = pd.DataFrame({"cases": np.arange(5, dtype=float)})  # 5 rows vs 10 in x
+    with pytest.raises(ValueError, match="same number of rows"):
+        predict(x, y, prediction_length=2)
+
+
 @pytest.mark.parametrize("prediction_length", [0, -1])
 def test_prediction_length_must_be_positive(prediction_length):
     """Reject zero and negative forecast horizons."""
@@ -263,6 +271,14 @@ def test_non_numeric_y_column_raises_clear_error():
     x = pd.Series([1.0, 2.0, 3.0], name="x")
     y = pd.DataFrame({"cases": ["low", "medium", "high"]})
     with pytest.raises(ValueError, match="cases"):
+        predict(x, y, prediction_length=2)
+
+
+def test_duplicate_y_columns_raise_clear_error():
+    """Report duplicate y column names explicitly instead of 'must be numeric'."""
+    x = pd.Series(np.arange(5, dtype=float), name="x")
+    y = pd.DataFrame(np.random.rand(5, 2), columns=["a", "a"])
+    with pytest.raises(ValueError, match="unique names"):
         predict(x, y, prediction_length=2)
 
 

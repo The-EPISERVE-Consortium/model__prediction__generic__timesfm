@@ -125,8 +125,15 @@ def _validate_numeric_y(y_df: pd.DataFrame) -> None:
         y_df: DataFrame of y columns to forecast.
 
     Raises:
-        ValueError: If any y column is not numeric.
+        ValueError: If any y column name is duplicated, or if any y column is
+            not numeric.
     """
+    duplicate_cols = y_df.columns[y_df.columns.duplicated()].unique().tolist()
+    if duplicate_cols:
+        raise ValueError(
+            "y columns must have unique names, found duplicates: "
+            + ", ".join(map(str, duplicate_cols))
+        )
     non_numeric_cols = [
         col for col in y_df.columns
         if not pd.api.types.is_numeric_dtype(y_df[col])
@@ -306,9 +313,10 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
         name and, for each y column, the point forecast plus q10/q90 intervals.
 
     Raises:
-        ValueError: If prediction_length is outside the supported range, a y
-            column contains invalid missing values, or x values cannot be
-            extrapolated.
+        ValueError: If prediction_length is outside the supported range, if x
+            and y have different lengths, if y column names are duplicated, if
+            a y column contains invalid missing values, or if x values cannot
+            be extrapolated.
     """
     if prediction_length <= 0:
         raise ValueError("prediction_length must be > 0")
@@ -320,6 +328,11 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
         raise ValueError(
             f"x_series must contain at least {_MIN_CONTEXT} points "
             f"(got {len(x_series)}) to forecast"
+        )
+    if len(x_series) != len(y_df):
+        raise ValueError(
+            "x_series and y_df must have the same number of rows: "
+            f"x_series has {len(x_series)} rows but y_df has {len(y_df)} rows"
         )
 
     x_series = _coerce_datetime_like_x(x_series)
