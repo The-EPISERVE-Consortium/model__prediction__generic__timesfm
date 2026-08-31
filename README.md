@@ -17,7 +17,7 @@ Accepts any parquet file with a leading x column and one or more y columns. Each
   - **datetime** — values must be unique, monotonic, and evenly spaced; future x values are extrapolated from that step
   - **numeric** — same as datetime
   - **timedelta** — same as numeric
-  - **string** — values must be unique and monotonic; rows are taken as-is (no sorting, no date parsing), the output x column is replaced with integer positions, and a matching `x_auto_converted` column is added for alignment
+  - **string** — values must be unique and monotonic; rows are taken as-is (no sorting, no date parsing), the output x column is replaced with integer positions, and a matching `x_auto_converted` column is added for alignment. These positions are **1-indexed absolute row positions** in the input file (1 = first row): forecast step *i* corresponds to input row `end_of_history + i`, so forecasts align directly with the source rows even when `prediction_offset` or a truncated history is used.
 - Remaining columns: one y series each, treated independently
 - Missing y values are interpolated only across interior gaps of up to 8 consecutive rows (gaps bounded by valid values on both sides); longer interior gaps are rejected. Leading and trailing runs of missing values are carried over from the nearest valid value and are always accepted.
 - Must have at least 2 columns and enough rows to satisfy `history_length + prediction_offset`
@@ -35,7 +35,7 @@ For each y column `col` in the input:
 | Column | Description |
 |---|---|
 | `<x_col>` | Extrapolated x value for this forecast step; for string x input, this is the synthetic integer position |
-| `x_auto_converted` | Integer position (only present when x column is a string type) |
+| `x_auto_converted` | 1-indexed absolute row position of this forecast step in the input file (only present when x column is a string type): step 1 is the row immediately after the last context row used, continuing the input's own row numbering |
 | `col` | Point forecast |
 | `col_q10` | 10th percentile |
 | `col_q90` | 90th percentile |
