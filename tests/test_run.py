@@ -2,13 +2,30 @@ import json
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
+from unittest.mock import MagicMock
 
+import numpy as np
 import pandas as pd
 import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Stub the timesfm package in this test process (as test_model.py does) so we
+# can import model constants without pulling in the real TimesFM/torch stack.
+# The subprocess-based CLI tests below stub timesfm via PYTHONPATH instead.
+if "timesfm" not in sys.modules:
+    timesfm_stub = types.ModuleType("timesfm")
+    timesfm_stub.ForecastConfig = MagicMock()
+    timesfm_stub.TimesFM_2p5_200M_torch = MagicMock()
+    sys.modules["timesfm"] = timesfm_stub
+
+sys.path.insert(0, str(REPO_ROOT / "src"))
+from model import _MIN_CONTEXT, _MAX_CONTEXT
+
+
 TIMESFM_STUB = """
 import numpy as np
 
@@ -144,11 +161,14 @@ def _run_without_config(tmp_path, work_dir):
 @pytest.mark.parametrize(
     ("config", "message"),
     [
-        ({"history_length": 0, "prediction_length": 1}, "history_length must be >= 2"),
-        ({"history_length": -1, "prediction_length": 1}, "history_length must be >= 2"),
-        ({"history_length": 1, "prediction_length": 1}, "history_length must be >= 2"),
-        ({"history_length": 2, "prediction_length": 0}, "prediction_length must be > 0"),
-        ({"history_length": 2, "prediction_length": -1}, "prediction_length must be > 0"),
+        ({"history_length": 0, "prediction_length": 1}, f"history_length must be >= {_MIN_CONTEXT}"),
+        ({"history_length": -1, "prediction_length": 1}, f"history_length must be >= {_MIN_CONTEXT}"),
+        ({"history_length": 1, "prediction_length": 1}, f"history_length must be >= {_MIN_CONTEXT}"),
+        # history_length=2 is below the model's minimum context; the CLI must
+        # reject it up front (with the model's bound), not after data loading.
+        ({"history_length": 2, "prediction_length": 1}, f"history_length must be >= {_MIN_CONTEXT}"),
+        ({"history_length": _MIN_CONTEXT, "prediction_length": 0}, "prediction_length must be > 0"),
+        ({"history_length": _MIN_CONTEXT, "prediction_length": -1}, "prediction_length must be > 0"),
     ],
 )
 def test_invalid_lengths_exit_before_loading_data(tmp_path, config, message):
@@ -188,7 +208,7 @@ def test_noninteger_config_exits_with_clear_error(tmp_path):
 )
 def test_config_integer_fields_reject_non_integer_types(tmp_path, key, value):
     """Verify integer config fields reject floats, strings, and booleans."""
-    config = {"history_length": 2, "prediction_length": 1, "prediction_offset": 0}
+    config = {"history_length": _MIN_CONTEXT, "prediction_length": 1, "prediction_offset": 0}
     config[key] = value
 
     result = _run_with_config(tmp_path, config)
@@ -212,7 +232,7 @@ def test_missing_input_reports_resolved_path(tmp_path):
     work_dir = tmp_path / "custom-work"
     result = _run_with_config(
         tmp_path,
-        {"history_length": 2, "prediction_length": 1},
+        {"history_length": _MIN_CONTEXT, "prediction_length": 1},
         work_dir=work_dir,
     )
 
@@ -242,6 +262,39 @@ def test_string_x_prediction_offset_writes_absolute_positions(tmp_path):
     output = pd.read_csv(work_dir / "output" / "predictions.tsv", sep="\t")
     assert list(output["week"]) == [5, 6]
     assert list(output["x_auto_converted"]) == [5, 6]
+
+
+def test_history_length_exceeding_max_context_truncates_window(tmp_path):
+    """Verify history_length > _MAX_CONTEXT truncates to the most recent
+    _MAX_CONTEXT rows before validation.
+
+    A long interior NaN gap placed entirely within the dropped prefix must not
+    cause a false rejection, and the window actually used must be the most
+    recent _MAX_CONTEXT rows (matching the CLI's WARNING).
+    """
+    work_dir = tmp_path / "work"
+    input_dir = work_dir / "input"
+    input_dir.mkdir(parents=True)
+    n = _MAX_CONTEXT + 60
+    x = np.arange(n, dtype=float)
+    y = np.random.rand(n) * 10 + 5
+    # 20-row interior NaN gap (well over the interpolation limit of 8) placed
+    # entirely within the prefix that gets dropped (rows 0 .. n-_MAX_CONTEXT-1).
+    gap_start = 40
+    y[gap_start:gap_start + 20] = np.nan
+    pd.DataFrame({"x": x, "y": y}).to_parquet(input_dir / "input.parquet")
+
+    result = _run_with_config(
+        tmp_path,
+        {"history_length": n, "prediction_length": 5},
+        work_dir=work_dir,
+    )
+
+    assert result.returncode == 0, result.stderr
+    # The window was truncated: used rows start at n - _MAX_CONTEXT.
+    assert f"Using rows {n - _MAX_CONTEXT}" in result.stdout
+    output = pd.read_csv(work_dir / "output" / "predictions.tsv", sep="\t")
+    assert len(output) == 5
 
 
 def test_model_runtime_error_exits_cleanly_without_traceback(tmp_path):

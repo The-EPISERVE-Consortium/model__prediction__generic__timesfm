@@ -330,6 +330,28 @@ def test_irregular_datetime_x_raises_clear_error():
         predict(x, y, prediction_length=2)
 
 
+def test_subsecond_datetime_irregularity_rejected():
+    """Reject datetime x values with sub-second step irregularity.
+
+    Diffs are compared in nanoseconds (~8.64e13 per day), so np.allclose's
+    default rtol=1e-5 silently tolerated ~0.86 s of irregularity on a daily
+    series. The uniform-step check must use an absolute tolerance so the
+    rejection is magnitude-independent.
+    """
+    x = pd.Series(
+        [
+            pd.Timestamp("2022-01-01"),
+            pd.Timestamp("2022-01-02"),
+            pd.Timestamp("2022-01-03 00:00:00.100"),
+            pd.Timestamp("2022-01-04"),
+        ],
+        name="date",
+    )
+    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0, 4.0]})
+    with pytest.raises(ValueError, match="uniform step"):
+        predict(x, y, prediction_length=2)
+
+
 def test_missing_x_name_defaults_to_x_column():
     """Use a stable x column name when x_series has no name."""
     x = pd.Series([1.0, 2.0, 3.0], name=None)
