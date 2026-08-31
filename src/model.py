@@ -57,9 +57,14 @@ def _validate_uniform_step(diffs: pd.Series, kind: str) -> None:
     """
     first_diff = diffs.iloc[0]
     if pd.api.types.is_timedelta64_dtype(diffs):
+        # Diffs are in nanoseconds (a day is ~8.64e13 ns), so np.allclose's
+        # default rtol=1e-5 would silently tolerate ~0.86 s of irregularity on
+        # a daily series (minutes on an annual one). Use an absolute 1 ns
+        # tolerance so the check is magnitude-independent: steps must be
+        # uniform to the nanosecond.
         diff_ns = diffs.map(lambda value: pd.Timedelta(value).value).to_numpy(dtype=np.float64)
         first_diff_ns = float(pd.Timedelta(first_diff).value)
-        if not np.allclose(diff_ns, first_diff_ns):
+        if not np.allclose(diff_ns, first_diff_ns, rtol=0, atol=1):
             raise ValueError(f"{kind} x values must have a uniform step")
         return
 
