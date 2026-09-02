@@ -5,6 +5,9 @@ Zero-shot time-series forecasting with [Google TimesFM 2.5](https://huggingface.
 with a leading x column and one or more y columns; each y series is forecast
 independently with 10th/90th-percentile bounds.
 
+**In:** `input.parquet` + `config.json` under `/work/input/`.
+**Out:** `predictions.tsv` under `/work/output/`.
+
 ## Input
 
 | Path | Description |
