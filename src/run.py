@@ -5,30 +5,12 @@ import pandas as pd
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from model import predict, _MAX_PREDICTION_STEPS, _MAX_CONTEXT, _MIN_CONTEXT
+from config_schema import validate_config, SchemaError
+from model import predict, _MAX_CONTEXT
 
-
-def _require_config_int(config: dict, key: str, default=None) -> int:
-    """Return a config value only if it is a real JSON integer.
-
-    Args:
-        config: Parsed config dictionary.
-        key: Config key to read.
-        default: Optional default value for missing keys.
-
-    Returns:
-        Integer config value.
-
-    Raises:
-        ValueError: If the value is missing without a default, is a boolean, or
-            is not an integer.
-    """
-    value = config.get(key, default)
-    if value is None:
-        raise ValueError(f"config.json missing required key: '{key}'")
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"config.json key '{key}' must be an integer")
-    return value
+# `--check-config`: validate config.json against fdo.json and exit, without
+# reading input data or loading the TimesFM weights.
+CHECK_ONLY = "--check-config" in sys.argv[1:]
 
 
 _work = Path(os.environ["WORK_DIR"]) if "WORK_DIR" in os.environ else Path("./work")
@@ -50,37 +32,27 @@ except json.JSONDecodeError as exc:
     print(f"ERROR: invalid config.json: {exc}", file=sys.stderr)
     sys.exit(1)
 
+# Validate config.json against the parameter declaration in fdo.json:
+# required keys, integer typing, and any minValue/maxValue bounds. Defaults
+# for omitted optional keys come from fdo.json too.
 try:
-    history_length = _require_config_int(config, "history_length")
-    prediction_length = _require_config_int(config, "prediction_length")
-    prediction_offset = _require_config_int(config, "prediction_offset", default=0)
-except ValueError as exc:
-    print(f"ERROR: {exc}", file=sys.stderr)
+    resolved, config_errors, config_warnings = validate_config(config)
+except SchemaError as exc:
+    print(f"ERROR: model config schema (fdo.json) is invalid: {exc}", file=sys.stderr)
     sys.exit(1)
+
+for warning in config_warnings:
+    print(f"WARNING: {warning}", file=sys.stderr)
+
+if config_errors:
+    for error in config_errors:
+        print(f"ERROR: {error}", file=sys.stderr)
+    sys.exit(1)
+
+history_length = resolved["history_length"]
+prediction_length = resolved["prediction_length"]
+prediction_offset = resolved["prediction_offset"]
 print(f"Config: history_length={history_length}, prediction_length={prediction_length}, prediction_offset={prediction_offset}")
-
-if history_length < _MIN_CONTEXT:
-    print(
-        f"ERROR: history_length must be >= {_MIN_CONTEXT} "
-        "(model minimum context for forecasting)",
-        file=sys.stderr,
-    )
-    sys.exit(1)
-
-if prediction_length <= 0:
-    print("ERROR: prediction_length must be > 0", file=sys.stderr)
-    sys.exit(1)
-
-if prediction_length > _MAX_PREDICTION_STEPS:
-    print(
-        f"ERROR: prediction_length={prediction_length} exceeds max {_MAX_PREDICTION_STEPS} steps",
-        file=sys.stderr,
-    )
-    sys.exit(1)
-
-if prediction_offset < 0:
-    print("ERROR: prediction_offset must be >= 0", file=sys.stderr)
-    sys.exit(1)
 
 if history_length > _MAX_CONTEXT:
     print(
@@ -88,6 +60,10 @@ if history_length > _MAX_CONTEXT:
         f"{_MAX_CONTEXT}; only the most recent {_MAX_CONTEXT} points will be used.",
         file=sys.stderr,
     )
+
+if CHECK_ONLY:
+    print("config.json OK")
+    sys.exit(0)
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 data_path = INPUT / "input.parquet"

@@ -16,9 +16,11 @@ _MAX_PREDICTION_STEPS = 512
 _MAX_CONTEXT = 2048
 
 # Min history points fed to the model. TimesFM requires a minimum context to
-# produce a forecast; shorter windows (which run.py's `history_length >= 2`
-# check permits) would otherwise reach forecast() and fail with an uncaught
-# non-ValueError. Reject them up front with a descriptive error.
+# produce a forecast; shorter windows would otherwise reach forecast() and
+# fail with an uncaught non-ValueError. fdo.json declares this as
+# history_length's minValue (kept in sync by tests/test_config_schema.py), so
+# run.py rejects anything lower up front; predict() also guards it directly
+# for library callers.
 _MIN_CONTEXT = 3
 
 # Max consecutive missing y values to bridge before forecasting. Longer gaps are

@@ -88,13 +88,14 @@ class TimesFM_2p5_200M_torch:
 """
 
 
-def _run_with_config_text(tmp_path, config_text, work_dir=None):
+def _run_with_config_text(tmp_path, config_text, work_dir=None, args=()):
     """Run the CLI with a temporary config file.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
         config_text: Raw config.json text to write.
         work_dir: Optional work directory to expose through WORK_DIR.
+        args: Extra command-line arguments for run.py (e.g. ``--check-config``).
 
     Returns:
         Completed subprocess result for the CLI invocation.
@@ -110,7 +111,7 @@ def _run_with_config_text(tmp_path, config_text, work_dir=None):
     env["WORK_DIR"] = str(work_dir)
 
     return subprocess.run(
-        [sys.executable, str(REPO_ROOT / "src" / "run.py")],
+        [sys.executable, str(REPO_ROOT / "src" / "run.py"), *args],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -119,18 +120,19 @@ def _run_with_config_text(tmp_path, config_text, work_dir=None):
     )
 
 
-def _run_with_config(tmp_path, config, work_dir=None):
+def _run_with_config(tmp_path, config, work_dir=None, args=()):
     """Run the CLI with a temporary JSON config.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
         config: Config dictionary to write to work/input/config.json.
         work_dir: Optional work directory to expose through WORK_DIR.
+        args: Extra command-line arguments for run.py (e.g. ``--check-config``).
 
     Returns:
         Completed subprocess result for the CLI invocation.
     """
-    return _run_with_config_text(tmp_path, json.dumps(config), work_dir=work_dir)
+    return _run_with_config_text(tmp_path, json.dumps(config), work_dir=work_dir, args=args)
 
 
 def _run_without_config(tmp_path, work_dir):
@@ -161,14 +163,14 @@ def _run_without_config(tmp_path, work_dir):
 @pytest.mark.parametrize(
     ("config", "message"),
     [
-        ({"history_length": 0, "prediction_length": 1}, f"history_length must be >= {_MIN_CONTEXT}"),
-        ({"history_length": -1, "prediction_length": 1}, f"history_length must be >= {_MIN_CONTEXT}"),
-        ({"history_length": 1, "prediction_length": 1}, f"history_length must be >= {_MIN_CONTEXT}"),
+        ({"history_length": 0, "prediction_length": 1}, f"'history_length' must be >= {_MIN_CONTEXT}"),
+        ({"history_length": -1, "prediction_length": 1}, f"'history_length' must be >= {_MIN_CONTEXT}"),
+        ({"history_length": 1, "prediction_length": 1}, f"'history_length' must be >= {_MIN_CONTEXT}"),
         # history_length=2 is below the model's minimum context; the CLI must
         # reject it up front (with the model's bound), not after data loading.
-        ({"history_length": 2, "prediction_length": 1}, f"history_length must be >= {_MIN_CONTEXT}"),
-        ({"history_length": _MIN_CONTEXT, "prediction_length": 0}, "prediction_length must be > 0"),
-        ({"history_length": _MIN_CONTEXT, "prediction_length": -1}, "prediction_length must be > 0"),
+        ({"history_length": 2, "prediction_length": 1}, f"'history_length' must be >= {_MIN_CONTEXT}"),
+        ({"history_length": _MIN_CONTEXT, "prediction_length": 0}, "'prediction_length' must be >= 1"),
+        ({"history_length": _MIN_CONTEXT, "prediction_length": -1}, "'prediction_length' must be >= 1"),
     ],
 )
 def test_invalid_lengths_exit_before_loading_data(tmp_path, config, message):
@@ -238,6 +240,44 @@ def test_missing_input_reports_resolved_path(tmp_path):
 
     assert result.returncode == 1
     assert f"{work_dir.resolve()}/input/input.parquet not found" in result.stderr
+
+
+def test_check_config_accepts_a_valid_config_without_data(tmp_path):
+    """--check-config validates config.json and exits 0 without input.parquet."""
+    result = _run_with_config(
+        tmp_path,
+        {"history_length": 10, "prediction_length": 5},
+        args=("--check-config",),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "config.json OK" in result.stdout
+    # No input.parquet exists; the mode must not have looked for one or run.
+    assert "input.parquet" not in result.stderr
+    assert "Written" not in result.stdout
+
+
+def test_check_config_reports_missing_required_key(tmp_path):
+    """--check-config surfaces a missing required key and exits non-zero."""
+    result = _run_with_config(
+        tmp_path, {"history_length": 10}, args=("--check-config",)
+    )
+
+    assert result.returncode == 1
+    assert "missing required key: 'prediction_length'" in result.stderr
+    assert "config.json OK" not in result.stdout
+
+
+def test_check_config_still_warns_about_over_long_history(tmp_path):
+    """--check-config passes but still emits the >max-context WARNING."""
+    result = _run_with_config(
+        tmp_path,
+        {"history_length": _MAX_CONTEXT + 1, "prediction_length": 5},
+        args=("--check-config",),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "exceeds model max context" in result.stderr
 
 
 def test_string_x_prediction_offset_writes_absolute_positions(tmp_path):

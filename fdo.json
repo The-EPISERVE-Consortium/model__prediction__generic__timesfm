@@ -16,14 +16,16 @@
     {
       "@type": "PropertyValue",
       "name": "history_length",
-      "description": "Number of rows to use as model context. Window ends at total_rows - prediction_offset.",
-      "valueRequired": true
+      "description": "Number of rows to use as model context. Window ends at total_rows - prediction_offset. Minimum 3 (the model's minimum context). Values above 2048 use only the most recent 2048 rows.",
+      "valueRequired": true,
+      "minValue": 3
     },
     {
       "@type": "PropertyValue",
       "name": "prediction_length",
-      "description": "Number of steps to forecast ahead. Maximum: 512.",
+      "description": "Number of steps to forecast ahead.",
       "valueRequired": true,
+      "minValue": 1,
       "maxValue": 512
     },
     {
@@ -31,6 +33,7 @@
       "name": "prediction_offset",
       "description": "Rows to skip at the end before the history window. Use for back-testing against known data.",
       "valueRequired": false,
+      "minValue": 0,
       "value": 0
     }
   ]
