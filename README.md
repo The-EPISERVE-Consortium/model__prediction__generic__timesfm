@@ -42,11 +42,35 @@ For each y column `col` in the input:
 
 ## Config parameters
 
-| Parameter | Required | Default | Description |
-|---|---|---|---|
-| `history_length` | yes | — | Number of rows to use as model context. Taken as the window ending at `total_rows - prediction_offset`. |
-| `prediction_length` | yes | — | Number of steps to forecast ahead. Maximum: 512. |
-| `prediction_offset` | no | `0` | Rows to skip at the end of the input before the history window. Use this to predict over already-known data for back-testing. |
+The accepted `config.json` keys are declared in [`fdo.json`](fdo.json)
+(`additionalProperty`) — that file is the source of truth. `src/run.py`
+validates `config.json` against it at startup: required keys must be present,
+values must be integers within any declared `minValue`/`maxValue`, and
+omitted optional keys are filled from `value` (the default). Unrecognised
+keys are reported as a warning and ignored. The table below mirrors
+`fdo.json`.
+
+| Parameter | Required | Default | Bounds | Description |
+|---|---|---|---|---|
+| `history_length` | yes | — | ≥ 3 | Rows of model context; window ends at `total_rows - prediction_offset`. Above 2048, only the most recent 2048 rows are used. |
+| `prediction_length` | yes | — | 1–512 | Steps to forecast ahead. |
+| `prediction_offset` | no | `0` | ≥ 0 | Rows to skip at the end of the input before the history window. Use this to predict over already-known data for back-testing. |
+
+Cross-field rules a per-key schema can't express — e.g. `history_length +
+prediction_offset` must not exceed the number of input rows — are still
+checked in `src/run.py` once the data is loaded.
+
+### Checking a config without running the model
+
+```bash
+docker run --rm -v $(pwd)/work/input:/work/input \
+  episerve/generic-timesfm:dev --check-config
+```
+
+Validates `/work/input/config.json` against `fdo.json` and exits `0`
+(printing `config.json OK`) or `1` with `ERROR:` lines. It reads no input
+data and does not load the TimesFM weights, so it is fast and needs only
+`config.json`. Locally: `WORK_DIR=./work python src/run.py --check-config`.
 
 ### prediction_offset example
 
