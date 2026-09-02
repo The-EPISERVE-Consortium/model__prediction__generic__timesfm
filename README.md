@@ -1,120 +1,73 @@
 # model__prediction__generic__timesfm
 
-Zero-shot time-series forecasting using [Google TimesFM 2.5](https://huggingface.co/google/timesfm-2.5-200m-pytorch) (200M parameter foundation model). No training or fine-tuning required.
-
-Accepts any parquet file with a leading x column and one or more y columns. Each y column is forecast independently with 10th/90th percentile uncertainty intervals.
+Zero-shot time-series forecasting with [Google TimesFM 2.5](https://huggingface.co/google/timesfm-2.5-200m-pytorch)
+(200M-param foundation model) — no training or fine-tuning. Accepts any parquet
+with a leading x column and one or more y columns; each y series is forecast
+independently with 10th/90th-percentile bounds.
 
 ## Input
 
 | Path | Description |
 |---|---|
-| `/work/input/input.parquet` | Time-series data. First column = x axis; all remaining columns = y series to forecast. |
-| `/work/input/config.json` | Run parameters (see below). |
+| `/work/input/input.parquet` | First column = x axis; every other column = a y series to forecast. |
+| `/work/input/config.json` | Run parameters — see [Config](#config). |
 
-### Input parquet rules
+**x column** (first column), by dtype:
 
-- First column: x values. Supported types:
-  - **datetime** — values must be unique, monotonic, and evenly spaced; future x values are extrapolated from that step
-  - **numeric** — same as datetime
-  - **timedelta** — same as numeric
-  - **string** — values must be unique and monotonic; rows are taken as-is (no sorting, no date parsing), the output x column is replaced with integer positions, and a matching `x_auto_converted` column is added for alignment. These positions are **1-indexed absolute row positions** in the input file (1 = first row): forecast step *i* corresponds to input row `end_of_history + i`, so forecasts align directly with the source rows even when `prediction_offset` or a truncated history is used.
-- Remaining columns: one y series each, treated independently
-- Missing y values are interpolated only across interior gaps of up to 8 consecutive rows (gaps bounded by valid values on both sides); longer interior gaps are rejected. Leading and trailing runs of missing values are carried over from the nearest valid value and are always accepted.
-- Must have at least 2 columns and enough rows to satisfy `history_length + prediction_offset`
+- **datetime / numeric / timedelta** — unique, monotonic, evenly spaced; future x is extrapolated from that step.
+- **string** — unique and monotonic, taken as-is (no sorting or date parsing). The output x column becomes integer positions and an `x_auto_converted` column is added: **1-indexed absolute row positions** in the input, so forecast step *i* is input row `end_of_history + i` and lines up with the source rows even with `prediction_offset` or a truncated history.
+
+**y columns** — one series each, independent. Interior NaN gaps of ≤ 8 rows are
+interpolated; longer ones are rejected. Leading/trailing NaN runs are filled from
+the nearest value. Needs ≥ 2 columns and ≥ `history_length + prediction_offset` rows.
 
 ## Output
 
-| Path | Description |
-|---|---|
-| `/work/output/predictions.tsv` | Forecast results (tab-separated). |
-
-### Prediction columns
-
-For each y column `col` in the input:
+`/work/output/predictions.tsv` — one row per forecast step. Per input y column `col`:
 
 | Column | Description |
 |---|---|
-| `<x_col>` | Extrapolated x value for this forecast step; for string x input, this is the synthetic integer position |
-| `x_auto_converted` | 1-indexed absolute row position of this forecast step in the input file (only present when x column is a string type): step 1 is the row immediately after the last context row used, continuing the input's own row numbering |
-| `col` | Point forecast |
-| `col_q10` | 10th percentile |
-| `col_q90` | 90th percentile |
+| `<x_col>` | Extrapolated x value (synthetic integer position for string x). |
+| `x_auto_converted` | 1-indexed absolute input-row position (string x only). |
+| `col` / `col_q10` / `col_q90` | Point forecast / 10th / 90th percentile. |
 
-## Config parameters
+## Config
 
-The accepted `config.json` keys are declared in [`fdo.json`](fdo.json)
-(`additionalProperty`) — that file is the source of truth. `src/run.py`
-validates `config.json` against it at startup: required keys must be present,
-values must be integers within any declared `minValue`/`maxValue`, and
-omitted optional keys are filled from `value` (the default). Unrecognised
-keys are reported as a warning and ignored. The table below mirrors
-`fdo.json`.
+Parameters are declared in [`fdo.json`](fdo.json) (`additionalProperty`) — the
+source of truth for names, whether each is required, defaults, and
+`minValue`/`maxValue`. `src/run.py` validates `config.json` against it at startup
+(unknown keys warn and are ignored); cross-field rules it can't express (e.g.
+`history_length + prediction_offset` ≤ input rows) are checked once the data loads.
 
-| Parameter | Required | Default | Bounds | Description |
-|---|---|---|---|---|
-| `history_length` | yes | — | ≥ 3 | Rows of model context; window ends at `total_rows - prediction_offset`. Above 2048, only the most recent 2048 rows are used. |
-| `prediction_length` | yes | — | 1–512 | Steps to forecast ahead. |
-| `prediction_offset` | no | `0` | ≥ 0 | Rows to skip at the end of the input before the history window. Use this to predict over already-known data for back-testing. |
+`prediction_offset` skips rows at the end before the history window — set it to
+`prediction_length` to forecast over already-known data for back-testing.
 
-Cross-field rules a per-key schema can't express — e.g. `history_length +
-prediction_offset` must not exceed the number of input rows — are still
-checked in `src/run.py` once the data is loaded.
-
-### Checking a config without running the model
+**Validate a config without running the model:**
 
 ```bash
-docker run --rm -v $(pwd)/work/input:/work/input \
-  episerve/generic-timesfm:dev --check-config
+docker run --rm -v $(pwd)/work/input:/work/input <image> --check-config
 ```
 
-Validates `/work/input/config.json` against `fdo.json` and exits `0`
-(printing `config.json OK`) or `1` with `ERROR:` lines. It reads no input
-data and does not load the TimesFM weights, so it is fast and needs only
-`config.json`. Locally: `WORK_DIR=./work python src/run.py --check-config`.
+Checks `config.json` against `fdo.json` and exits `0` (`config.json OK`) or `1`
+(`ERROR:` lines); reads no data, loads no weights. Locally:
+`WORK_DIR=./work python src/run.py --check-config`.
 
-### prediction_offset example
-
-With 100 rows in the input and the config below, the model uses rows 31–70 as context and predicts steps 71–100 — which overlap with the real data, enabling direct comparison:
-
-```json
-{
-  "history_length": 40,
-  "prediction_length": 30,
-  "prediction_offset": 30
-}
-```
-
-Without `prediction_offset` (or with `prediction_offset: 0`) the model uses the last `history_length` rows and predicts beyond the end of the available data.
-
-## Running locally
+## Develop
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
+pytest tests/ -v          # TimesFM is mocked — no model download
 
-# Tests (TimesFM is mocked — no model download needed)
-pytest tests/ -v
-```
-
-## Running with Docker
-
-```bash
 docker build -t episerve/generic-timesfm:dev .
-
-docker run --rm \
-  -v $(pwd)/work/input:/work/input \
-  -v $(pwd)/work/output:/work/output \
+docker run --rm -v $(pwd)/work/input:/work/input -v $(pwd)/work/output:/work/output \
   episerve/generic-timesfm:dev
 ```
 
-The model weights (~800 MB) are downloaded from HuggingFace on first run.
+Model weights (~800 MB) download from HuggingFace on first real run.
 
 ## Release
 
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The GitHub Actions workflow builds the Docker image, runs the test suite, and pushes to `ghcr.io/the-episerve-consortium/model__prediction__generic__timesfm`.
+Push to `main` → CI builds, tests inside the image, and pushes `:latest` to GHCR.
+`git tag v0.1.0 && git push origin v0.1.0` also publishes `:v0.1.0`.
