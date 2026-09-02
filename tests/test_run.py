@@ -280,6 +280,27 @@ def test_check_config_still_warns_about_over_long_history(tmp_path):
     assert "exceeds model max context" in result.stderr
 
 
+@pytest.mark.parametrize("columns", [["x"], ["x", "y", "z"], ["x", "y", "z1", "z2"]])
+def test_rejects_parquet_without_exactly_two_columns(tmp_path, columns):
+    """input.parquet must be exactly x + y; anything else is a clear error."""
+    work_dir = tmp_path / "work"
+    input_dir = work_dir / "input"
+    input_dir.mkdir(parents=True)
+    pd.DataFrame({c: np.arange(10, dtype=float) for c in columns}).to_parquet(
+        input_dir / "input.parquet"
+    )
+
+    result = _run_with_config(
+        tmp_path,
+        {"history_length": 3, "prediction_length": 2},
+        work_dir=work_dir,
+    )
+
+    assert result.returncode == 1
+    assert "must have exactly 2 columns" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_string_x_prediction_offset_writes_absolute_positions(tmp_path):
     """Verify string x output positions are shifted to absolute row positions."""
     work_dir = tmp_path / "work"

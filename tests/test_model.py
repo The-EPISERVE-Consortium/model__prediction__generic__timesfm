@@ -19,40 +19,39 @@ import model as model_module
 from model import predict, _MAX_PREDICTION_STEPS
 
 
-def _make_xy(n=100, y_cols=("a", "b"), freq="D"):
-    """Create sample x/y forecast inputs.
+def _make_xy(n=100, y_name="cases", freq="D"):
+    """Create a sample (x_series, y_series) pair.
 
     Args:
-        n: Number of rows to create.
-        y_cols: Names of y columns to include.
-        freq: Pandas frequency string for the x column.
+        n: Number of rows.
+        y_name: Name of the y series.
+        freq: Pandas frequency string for the datetime x column.
 
     Returns:
-        Tuple of x series and y DataFrame.
+        Tuple of the x series (named "date") and the y series.
     """
-    dates = pd.date_range("2022-01-01", periods=n, freq=freq)
-    x_series = pd.Series(dates, name="date")
-    y_df = pd.DataFrame({col: np.random.rand(n) * 50 + 10 for col in y_cols})
-    return x_series, y_df
+    x_series = pd.Series(pd.date_range("2022-01-01", periods=n, freq=freq), name="date")
+    y_series = pd.Series(np.random.rand(n) * 50 + 10, name=y_name)
+    return x_series, y_series
 
 
 def _mock_forecast(inputs, horizon):
-    """Return deterministic forecast arrays for tests.
+    """Return deterministic (point, quantile) forecast arrays for a batch of one.
 
     Args:
-        inputs: Model input arrays.
+        inputs: Model input arrays (length 1 -- the model forecasts a single series).
         horizon: Number of forecast steps.
 
     Returns:
-        Tuple containing point forecasts and quantile forecasts.
+        Tuple of point forecasts and quantile forecasts.
     """
     batch = len(inputs)
     point = np.full((batch, horizon), 45.0)
     # Channels are [mean, q0.1, q0.2, ..., q0.9]: index 0 is the mean, index 1
     # is q0.1, index 9 is q0.9.
     quantiles = np.zeros((batch, horizon, 10))
-    quantiles[..., 0]  = 45.0  # mean
-    quantiles[..., 1]  = 30.0  # q0.1
+    quantiles[..., 0] = 45.0   # mean
+    quantiles[..., 1] = 30.0   # q0.1
     quantiles[..., -1] = 60.0  # q0.9
     return point, quantiles
 
@@ -78,11 +77,16 @@ def test_output_row_count():
     assert len(predict(x, y, prediction_length=7)) == 7
 
 
-def test_output_columns_named_correctly():
-    x, y = _make_xy(y_cols=("temp", "pressure"))
+def test_output_columns():
+    x, y = _make_xy(y_name="value")
     result = predict(x, y, prediction_length=3)
-    expected = {"date", "temp", "temp_q10", "temp_q90", "pressure", "pressure_q10", "pressure_q90"}
-    assert set(result.columns) == expected
+    assert set(result.columns) == {"date", "value", "value_q10", "value_q90"}
+
+
+def test_output_column_order():
+    x, y = _make_xy(y_name="value")
+    result = predict(x, y, prediction_length=3)
+    assert list(result.columns) == ["date", "value", "value_q10", "value_q90"]
 
 
 def test_x_extrapolation_daily():
@@ -107,7 +111,7 @@ def test_x_extrapolation_daily_across_dst():
         pd.date_range("2022-03-26", periods=4, freq="D", tz="Europe/Berlin"),
         name="date",
     )
-    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0, 4.0]})
+    y = pd.Series([1.0, 2.0, 3.0, 4.0], name="cases")
     result = predict(x, y, prediction_length=2)
     expected = pd.date_range("2022-03-30", periods=2, freq="D", tz="Europe/Berlin")
     assert list(result["date"]) == list(expected)
@@ -116,7 +120,7 @@ def test_x_extrapolation_daily_across_dst():
 def test_x_extrapolation_numeric():
     n = 50
     x = pd.Series(np.arange(n, dtype=float), name="x")
-    y = pd.DataFrame({"y": np.random.rand(n)})
+    y = pd.Series(np.random.rand(n), name="y")
     result = predict(x, y, prediction_length=3)
     for i, row in enumerate(result.itertuples(), 1):
         assert row.x == pytest.approx(n - 1 + i)
@@ -125,41 +129,30 @@ def test_x_extrapolation_numeric():
 def test_x_extrapolation_timedelta_microseconds():
     """Extrapolate uniform non-ns timedelta x values."""
     x = pd.Series(np.array([0, 1000, 2000], dtype="timedelta64[us]"), name="delta")
-    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    y = pd.Series([1.0, 2.0, 3.0], name="cases")
     result = predict(x, y, prediction_length=2)
-    expected = [
-        pd.Timedelta(microseconds=3000),
-        pd.Timedelta(microseconds=4000),
-    ]
+    expected = [pd.Timedelta(microseconds=3000), pd.Timedelta(microseconds=4000)]
     assert list(result["delta"]) == expected
-
-
-def test_single_y_column():
-    x, y = _make_xy(y_cols=("value",))
-    result = predict(x, y, prediction_length=5)
-    assert set(result.columns) == {"date", "value", "value_q10", "value_q90"}
 
 
 def test_q10_reads_q01_channel_not_mean():
     # q10 must come from channel 1 (q0.1=30.0), not channel 0 (mean=45.0).
-    x, y = _make_xy()
+    x, y = _make_xy(y_name="cases")
     result = predict(x, y, prediction_length=5)
-    for col in y.columns:
-        assert (result[f"{col}_q10"] == 30.0).all()
-        assert (result[f"{col}_q90"] == 60.0).all()
+    assert (result["cases_q10"] == 30.0).all()
+    assert (result["cases_q90"] == 60.0).all()
 
 
 def test_quantile_ordering():
-    x, y = _make_xy()
+    x, y = _make_xy(y_name="cases")
     result = predict(x, y, prediction_length=5)
-    for col in y.columns:
-        assert (result[f"{col}_q10"] <= result[f"{col}_q90"]).all()
+    assert (result["cases_q10"] <= result["cases_q90"]).all()
 
 
 def test_x_string_column_outputs_integer_positions():
-    weeks = [f"2022-W{i+1:02d}" for i in range(50)]
+    weeks = [f"2022-W{i + 1:02d}" for i in range(50)]
     x = pd.Series(weeks, name="Meldewoche")
-    y = pd.DataFrame({"cases": np.random.rand(50) * 100})
+    y = pd.Series(np.random.rand(50) * 100, name="cases")
     result = predict(x, y, prediction_length=3)
     assert result.columns[0] == "Meldewoche"
     assert list(result["Meldewoche"]) == [51, 52, 53]
@@ -168,7 +161,7 @@ def test_x_string_column_outputs_integer_positions():
 
 
 def test_x_non_string_column_has_no_auto_converted():
-    x, y = _make_xy(y_cols=("val",))
+    x, y = _make_xy(y_name="val")
     result = predict(x, y, prediction_length=3)
     assert "x_auto_converted" not in result.columns
 
@@ -176,22 +169,15 @@ def test_x_non_string_column_has_no_auto_converted():
 def test_object_datetime_x_extrapolates_as_datetime():
     """Treat object columns containing datetime values as datetime x values."""
     x = pd.Series(
-        [
-            datetime(2022, 1, 1),
-            datetime(2022, 1, 2),
-            datetime(2022, 1, 3),
-        ],
+        [datetime(2022, 1, 1), datetime(2022, 1, 2), datetime(2022, 1, 3)],
         dtype=object,
         name="date",
     )
-    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    y = pd.Series([1.0, 2.0, 3.0], name="cases")
     result = predict(x, y, prediction_length=2)
 
     assert "x_auto_converted" not in result.columns
-    assert list(result["date"]) == [
-        pd.Timestamp("2022-01-04"),
-        pd.Timestamp("2022-01-05"),
-    ]
+    assert list(result["date"]) == [pd.Timestamp("2022-01-04"), pd.Timestamp("2022-01-05")]
 
 
 def test_exceeds_max_raises():
@@ -205,7 +191,7 @@ def test_too_short_history_raises_clean_error():
     from model import _MIN_CONTEXT
 
     x = pd.Series(np.arange(_MIN_CONTEXT - 1, dtype=float), name="x")
-    y = pd.DataFrame({"cases": np.arange(_MIN_CONTEXT - 1, dtype=float)})
+    y = pd.Series(np.arange(_MIN_CONTEXT - 1, dtype=float), name="cases")
     with pytest.raises(ValueError, match=f"at least {_MIN_CONTEXT} points"):
         predict(x, y, prediction_length=2)
 
@@ -218,26 +204,26 @@ def test_prediction_length_must_be_positive(prediction_length):
         predict(x, y, prediction_length=prediction_length)
 
 
-def test_all_nan_column_raises_clear_error():
-    """Reject y columns that contain only NaN values."""
-    x, y = _make_xy(y_cols=("good", "empty"))
-    y["empty"] = np.nan
-    with pytest.raises(ValueError, match="empty"):
+def test_all_nan_y_raises_clear_error():
+    """Reject a y series that contains only NaN values."""
+    x, _ = _make_xy(n=20)
+    y = pd.Series([np.nan] * 20, name="cases")
+    with pytest.raises(ValueError, match="'cases' must contain at least one non-NaN"):
         predict(x, y, prediction_length=3)
 
 
 def test_long_nan_gap_raises_clear_error():
-    """Reject y columns with long consecutive NaN gaps."""
+    """Reject a y series with a long consecutive interior NaN gap."""
     x = pd.Series(np.arange(12, dtype=float), name="x")
-    y = pd.DataFrame({"cases": [1.0] + [np.nan] * 9 + [11.0, 12.0]})
-    with pytest.raises(ValueError, match="cases .*9"):
+    y = pd.Series([1.0] + [np.nan] * 9 + [11.0, 12.0], name="cases")
+    with pytest.raises(ValueError, match=r"'cases' has a NaN gap longer than 8 .*\(9\)"):
         predict(x, y, prediction_length=2)
 
 
 def test_long_leading_nan_run_is_accepted():
     """Accept a long leading NaN run that .bfill() carries over safely."""
     x = pd.Series(np.arange(20, dtype=float), name="x")
-    y = pd.DataFrame({"cases": [np.nan] * 9 + list(range(11, 22))})
+    y = pd.Series([np.nan] * 9 + list(range(11, 22)), name="cases")
     result = predict(x, y, prediction_length=2)
     assert len(result) == 2
 
@@ -245,99 +231,77 @@ def test_long_leading_nan_run_is_accepted():
 def test_long_trailing_nan_run_is_accepted():
     """Accept a long trailing NaN run that .ffill() carries over safely."""
     x = pd.Series(np.arange(20, dtype=float), name="x")
-    y = pd.DataFrame({"cases": list(range(1, 12)) + [np.nan] * 9})
+    y = pd.Series(list(range(1, 12)) + [np.nan] * 9, name="cases")
     result = predict(x, y, prediction_length=2)
     assert len(result) == 2
 
 
-def test_edge_both_sides_valid_interior_gap_still_rejected():
-    """An interior gap longer than the limit is still rejected."""
-    x = pd.Series(np.arange(12, dtype=float), name="x")
-    y = pd.DataFrame({"cases": [1.0] + [np.nan] * 9 + [11.0, 12.0]})
-    with pytest.raises(ValueError, match="cases .*9"):
-        predict(x, y, prediction_length=2)
-
-
-def test_non_numeric_y_column_raises_clear_error():
-    """Reject non-numeric y columns with the column name."""
+def test_non_numeric_y_raises_clear_error():
+    """Reject a non-numeric y series, naming the column."""
     x = pd.Series([1.0, 2.0, 3.0], name="x")
-    y = pd.DataFrame({"cases": ["low", "medium", "high"]})
-    with pytest.raises(ValueError, match="cases"):
+    y = pd.Series(["low", "medium", "high"], name="cases")
+    with pytest.raises(ValueError, match="'cases' must be numeric"):
         predict(x, y, prediction_length=2)
 
 
 def test_duplicate_string_x_raises_clear_error():
-    """Reject duplicate string x labels before forecasting."""
     x = pd.Series(["2022-W01", "2022-W01", "2022-W02"], name="week")
-    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    y = pd.Series([1.0, 2.0, 3.0], name="cases")
     with pytest.raises(ValueError, match="unique"):
         predict(x, y, prediction_length=2)
 
 
 def test_nonmonotonic_string_x_raises_clear_error():
-    """Reject out-of-order string x labels before forecasting."""
     x = pd.Series(["2022-W01", "2022-W03", "2022-W02"], name="week")
-    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    y = pd.Series([1.0, 2.0, 3.0], name="cases")
     with pytest.raises(ValueError, match="monotonic"):
         predict(x, y, prediction_length=2)
 
 
 def test_duplicate_numeric_x_raises_clear_error():
-    """Reject duplicate numeric x values before forecasting."""
     x = pd.Series([1.0, 1.0, 2.0], name="x")
-    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    y = pd.Series([1.0, 2.0, 3.0], name="cases")
     with pytest.raises(ValueError, match="unique"):
         predict(x, y, prediction_length=2)
 
 
 def test_nonmonotonic_numeric_x_raises_clear_error():
-    """Reject out-of-order numeric x values before forecasting."""
     x = pd.Series([5.0, 1.0, 2.0, 3.0, 4.0], name="x")
-    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    y = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0], name="cases")
     with pytest.raises(ValueError, match="monotonic"):
         predict(x, y, prediction_length=2)
 
 
 def test_nan_numeric_x_raises_clear_error():
-    """Reject missing numeric x values before forecasting."""
     x = pd.Series([1.0, np.nan, 3.0], name="x")
-    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    y = pd.Series([1.0, 2.0, 3.0], name="cases")
     with pytest.raises(ValueError, match="NaN"):
         predict(x, y, prediction_length=2)
 
 
 def test_irregular_numeric_x_raises_clear_error():
-    """Reject numeric x values that do not have a uniform step."""
     x = pd.Series([1.0, 2.0, 4.0], name="x")
-    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    y = pd.Series([1.0, 2.0, 3.0], name="cases")
     with pytest.raises(ValueError, match="uniform step"):
         predict(x, y, prediction_length=2)
 
 
 def test_duplicate_datetime_x_raises_clear_error():
-    """Reject duplicate datetime x values before forecasting."""
     x = pd.Series(pd.to_datetime(["2022-01-01", "2022-01-01", "2022-01-02"]), name="date")
-    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    y = pd.Series([1.0, 2.0, 3.0], name="cases")
     with pytest.raises(ValueError, match="unique"):
         predict(x, y, prediction_length=2)
 
 
 def test_irregular_datetime_x_raises_clear_error():
-    """Reject datetime x values that do not have a uniform step."""
     x = pd.Series(pd.to_datetime(["2022-01-01", "2022-01-02", "2022-01-04"]), name="date")
-    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    y = pd.Series([1.0, 2.0, 3.0], name="cases")
     with pytest.raises(ValueError, match="uniform step"):
         predict(x, y, prediction_length=2)
 
 
 def test_subsecond_datetime_irregularity_rejected():
-    """Reject datetime x values with sub-second step irregularity.
-
-    Diffs are compared in nanoseconds (~8.64e13 per day), so np.allclose's
-    default rtol=1e-5 silently tolerated ~0.86 s of irregularity on a daily
-    series. The uniform-step check must use an absolute tolerance so the
-    rejection is magnitude-independent.
-    """
+    """Reject datetime x values with sub-second step irregularity."""
     x = pd.Series(
         [
             pd.Timestamp("2022-01-01"),
@@ -347,7 +311,7 @@ def test_subsecond_datetime_irregularity_rejected():
         ],
         name="date",
     )
-    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0, 4.0]})
+    y = pd.Series([1.0, 2.0, 3.0, 4.0], name="cases")
     with pytest.raises(ValueError, match="uniform step"):
         predict(x, y, prediction_length=2)
 
@@ -355,10 +319,18 @@ def test_subsecond_datetime_irregularity_rejected():
 def test_missing_x_name_defaults_to_x_column():
     """Use a stable x column name when x_series has no name."""
     x = pd.Series([1.0, 2.0, 3.0], name=None)
-    y = pd.DataFrame({"cases": [1.0, 2.0, 3.0]})
+    y = pd.Series([1.0, 2.0, 3.0], name="cases")
     result = predict(x, y, prediction_length=2)
     assert list(result.columns) == ["x", "cases", "cases_q10", "cases_q90"]
     assert list(result["x"]) == [4.0, 5.0]
+
+
+def test_missing_y_name_defaults_to_y_column():
+    """Use a stable y column name when y_series has no name."""
+    x = pd.Series([1.0, 2.0, 3.0], name="x")
+    y = pd.Series([1.0, 2.0, 3.0], name=None)
+    result = predict(x, y, prediction_length=2)
+    assert list(result.columns) == ["x", "y", "y_q10", "y_q90"]
 
 
 def test_unexpected_quantile_channel_count_raises(mock_timesfm):
@@ -368,7 +340,7 @@ def test_unexpected_quantile_channel_count_raises(mock_timesfm):
         np.full((len(inputs), horizon), 45.0),
         np.zeros((len(inputs), horizon, 9)),
     )
-    x, y = _make_xy(y_cols=("cases",))
+    x, y = _make_xy(y_name="cases")
 
     with pytest.raises(ValueError, match="10 channels"):
         predict(x, y, prediction_length=2)

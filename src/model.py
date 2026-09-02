@@ -125,23 +125,18 @@ def _datetime_step(x_series: pd.Series):
     return diffs.iloc[0]
 
 
-def _validate_numeric_y(y_df: pd.DataFrame) -> None:
-    """Validate that all y columns have numeric dtypes.
+def _validate_numeric_y(y_series: pd.Series) -> None:
+    """Validate that the y series has a numeric dtype.
 
     Args:
-        y_df: DataFrame of y columns to forecast.
+        y_series: The single time series to forecast.
 
     Raises:
-        ValueError: If any y column is not numeric.
+        ValueError: If the y series is not numeric.
     """
-    non_numeric_cols = [
-        col for col in y_df.columns
-        if not pd.api.types.is_numeric_dtype(y_df[col])
-    ]
-    if non_numeric_cols:
-        raise ValueError(
-            "y columns must be numeric: " + ", ".join(map(str, non_numeric_cols))
-        )
+    if not pd.api.types.is_numeric_dtype(y_series):
+        name = y_series.name if y_series.name is not None else "y"
+        raise ValueError(f"y column '{name}' must be numeric")
 
 
 def _longest_interior_nan_run(series: pd.Series) -> int:
@@ -175,50 +170,47 @@ def _longest_interior_nan_run(series: pd.Series) -> int:
     return longest
 
 
-def _validate_interpolation_gaps(y_df: pd.DataFrame) -> None:
-    """Validate that y columns do not contain long missing runs.
+def _validate_interpolation_gaps(y_series: pd.Series) -> None:
+    """Validate that the y series does not contain a long missing run.
 
     Args:
-        y_df: Numeric y DataFrame to inspect.
+        y_series: Numeric y series to inspect.
 
     Raises:
-        ValueError: If any y column has a consecutive NaN run longer than the
-            supported interpolation limit.
+        ValueError: If the y series has a consecutive interior NaN run longer
+            than the supported interpolation limit.
     """
-    long_gap_cols = []
-    for col in y_df.columns:
-        longest_run = _longest_interior_nan_run(y_df[col])
-        if longest_run > _MAX_INTERPOLATION_GAP:
-            long_gap_cols.append(f"{col} ({longest_run})")
-    if long_gap_cols:
+    longest_run = _longest_interior_nan_run(y_series)
+    if longest_run > _MAX_INTERPOLATION_GAP:
+        name = y_series.name if y_series.name is not None else "y"
         raise ValueError(
-            "y columns contain NaN gaps longer than "
-            f"{_MAX_INTERPOLATION_GAP} consecutive values: "
-            + ", ".join(long_gap_cols)
+            f"y column '{name}' has a NaN gap longer than "
+            f"{_MAX_INTERPOLATION_GAP} consecutive values ({longest_run})"
         )
 
 
-def _validate_forecast_shapes(point, quantiles, prediction_length: int, n_cols: int) -> None:
+def _validate_forecast_shapes(point, quantiles, prediction_length: int) -> None:
     """Validate model forecast array shapes before reading fixed channels.
+
+    The model is fed a single series, so TimesFM returns a batch of one.
 
     Args:
         point: Point forecast array returned by TimesFM.
         quantiles: Quantile forecast array returned by TimesFM.
         prediction_length: Expected forecast horizon.
-        n_cols: Expected number of independent y series.
 
     Raises:
         ValueError: If forecast outputs do not have the expected dimensions.
     """
-    if point.shape != (n_cols, prediction_length):
+    if point.shape != (1, prediction_length):
         raise ValueError(
             "TimesFM point forecast has unexpected shape: "
-            f"{point.shape}; expected {(n_cols, prediction_length)}"
+            f"{point.shape}; expected {(1, prediction_length)}"
         )
-    if quantiles.ndim != 3 or quantiles.shape[:2] != (n_cols, prediction_length):
+    if quantiles.ndim != 3 or quantiles.shape[:2] != (1, prediction_length):
         raise ValueError(
             "TimesFM quantile forecast has unexpected shape: "
-            f"{quantiles.shape}; expected ({n_cols}, {prediction_length}, channels)"
+            f"{quantiles.shape}; expected (1, {prediction_length}, channels)"
         )
     if quantiles.shape[2] != 10:
         raise ValueError(
@@ -298,23 +290,22 @@ def _extrapolate_x(x_series: pd.Series, n: int) -> list:
     return [last + step * (i + 1) for i in range(n)]
 
 
-def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> pd.DataFrame:
-    """Forecast future values for each y column.
+def predict(x_series: pd.Series, y_series: pd.Series, prediction_length: int) -> pd.DataFrame:
+    """Forecast future values of a single y series.
 
     Args:
         x_series: Series of x values, such as datetime, numeric, timedelta, or
             ISO-week strings.
-        y_df: DataFrame where each column is an independent time series to
-            forecast.
+        y_series: The single time series to forecast.
         prediction_length: Number of steps ahead to predict.
 
     Returns:
-        DataFrame with one row per predicted step. Columns include the x column
-        name and, for each y column, the point forecast plus q10/q90 intervals.
+        DataFrame with one row per predicted step: the x column, then the y
+        point forecast plus its q10/q90 interval.
 
     Raises:
-        ValueError: If prediction_length is outside the supported range, a y
-            column contains invalid missing values, or x values cannot be
+        ValueError: If prediction_length is outside the supported range, the y
+            series contains invalid missing values, or x values cannot be
             extrapolated.
     """
     if prediction_length <= 0:
@@ -330,31 +321,23 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
         )
 
     x_series = _coerce_datetime_like_x(x_series)
-    _validate_numeric_y(y_df)
-    numeric_y = y_df.astype(np.float64)
-    all_nan_cols = numeric_y.columns[numeric_y.isna().all()].tolist()
-    if all_nan_cols:
-        raise ValueError(
-            "y columns must contain at least one non-NaN value: "
-            + ", ".join(map(str, all_nan_cols))
-        )
+    _validate_numeric_y(y_series)
+    numeric_y = y_series.astype(np.float64)
+    y_name = y_series.name if y_series.name is not None else "y"
+    if numeric_y.isna().all():
+        raise ValueError(f"y column '{y_name}' must contain at least one non-NaN value")
     _validate_interpolation_gaps(numeric_y)
 
     # Missing values are gaps, not zeros — filling with 0.0 injects artificial
     # cliffs that corrupt the model's input normalization. Interpolate interior
     # gaps linearly and carry the nearest value over leading/trailing NaNs.
-    inputs = [
-        numeric_y[col]
-        .interpolate(
-            method="linear",
-            limit=_MAX_INTERPOLATION_GAP,
-            limit_direction="both",
-        )
+    series = (
+        numeric_y
+        .interpolate(method="linear", limit=_MAX_INTERPOLATION_GAP, limit_direction="both")
         .bfill()
         .ffill()
         .to_numpy(dtype=np.float64)
-        for col in y_df.columns
-    ]
+    )
 
     is_string_x = (
         pd.api.types.is_string_dtype(x_series)
@@ -362,10 +345,10 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
     )
     future_x = _extrapolate_x(x_series, prediction_length)
 
-    point, quantiles = _model().forecast(inputs=inputs, horizon=prediction_length)
-    _validate_forecast_shapes(point, quantiles, prediction_length, len(y_df.columns))
-    # point:     (n_cols, prediction_length)
-    # quantiles: (n_cols, prediction_length, 10)
+    point, quantiles = _model().forecast(inputs=[series], horizon=prediction_length)
+    _validate_forecast_shapes(point, quantiles, prediction_length)
+    # point:     (1, prediction_length)
+    # quantiles: (1, prediction_length, 10)
     # Quantile channels are [mean, q0.1, q0.2, ..., q0.9] — index 0 is the mean
     # (NOT q0.1), index 5 is the median, index 9 is q0.9.
     _Q10, _Q90 = 1, 9
@@ -376,10 +359,9 @@ def predict(x_series: pd.Series, y_df: pd.DataFrame, prediction_length: int) -> 
         row = {x_name: future_x[i]}
         if is_string_x:
             row["x_auto_converted"] = future_x[i]
-        for j, col in enumerate(y_df.columns):
-            row[col]          = float(point[j, i])
-            row[f"{col}_q10"] = float(quantiles[j, i, _Q10])
-            row[f"{col}_q90"] = float(quantiles[j, i, _Q90])
+        row[y_name]          = float(point[0, i])
+        row[f"{y_name}_q10"] = float(quantiles[0, i, _Q10])
+        row[f"{y_name}_q90"] = float(quantiles[0, i, _Q90])
         rows.append(row)
 
     return pd.DataFrame(rows)

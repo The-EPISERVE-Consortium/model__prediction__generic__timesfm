@@ -74,8 +74,12 @@ if not data_path.exists():
 df_full = pd.read_parquet(data_path)
 print(f"Loaded {len(df_full)} rows, columns: {list(df_full.columns)}")
 
-if len(df_full.columns) < 2:
-    print("ERROR: input.parquet must have at least 2 columns (x + at least one y)", file=sys.stderr)
+if len(df_full.columns) != 2:
+    print(
+        f"ERROR: input.parquet must have exactly 2 columns — x (first) and y "
+        f"(second) — got {len(df_full.columns)}: {list(df_full.columns)}",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 if history_length + prediction_offset > len(df_full):
@@ -91,7 +95,7 @@ if history_length + prediction_offset > len(df_full):
 
 # ── Prepare ───────────────────────────────────────────────────────────────────
 x_col      = df_full.columns[0]
-y_cols     = list(df_full.columns[1:])
+y_col      = df_full.columns[1]
 total_rows = len(df_full)
 is_string_x = pd.api.types.is_string_dtype(df_full[x_col]) or pd.api.types.is_object_dtype(df_full[x_col])
 
@@ -105,14 +109,14 @@ if history_length > _MAX_CONTEXT:
     start_idx = end_idx - _MAX_CONTEXT
 df = df_full.iloc[start_idx:end_idx].reset_index(drop=True)
 x_series = df[x_col]
-y_df     = df[y_cols]
+y_series = df[y_col]
 
-print(f"x column: {x_col!r}, y columns: {y_cols}")
+print(f"x column: {x_col!r}, y column: {y_col!r}")
 print(f"Using rows {start_idx}–{end_idx - 1} ({x_series.iloc[0]} – {x_series.iloc[-1]})")
 
 # ── Predict ───────────────────────────────────────────────────────────────────
 try:
-    predictions = predict(x_series, y_df, prediction_length)
+    predictions = predict(x_series, y_series, prediction_length)
 except ValueError as exc:
     print(f"ERROR: {exc}", file=sys.stderr)
     sys.exit(1)
