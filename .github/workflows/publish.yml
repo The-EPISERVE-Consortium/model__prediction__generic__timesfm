@@ -15,6 +15,14 @@ env:
   IMAGE: ghcr.io/the-episerve-consortium/model__prediction__generic__timesfm
 
 jobs:
+  model-card:
+    # Checks fdo.json against the EPISERVE model-card spec. Kept separate from
+    # build-and-test: an invalid card does not stop the image from publishing.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: The-EPISERVE-Consortium/episerve_specs@v0.1.0
+
   build-and-test:
     runs-on: ubuntu-latest
     permissions:

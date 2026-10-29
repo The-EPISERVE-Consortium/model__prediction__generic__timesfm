@@ -36,9 +36,10 @@ the nearest value. Needs ≥ `history_length + prediction_offset` rows.
 
 ## Config
 
-Parameters are declared in [`fdo.json`](fdo.json) (`additionalProperty`) — the
-source of truth for names, whether each is required, defaults, and
-`minValue`/`maxValue`. `src/run.py` validates `config.json` against it at startup
+Parameters are declared in [`fdo.json`](fdo.json), the model card (see
+*Model card* below): `episerve:parameters`, mirrored in `additionalProperty` —
+the source of truth for names, whether each is required, defaults, and
+`minValue`/`maxValue`. `src/config_schema.py` reads `additionalProperty`. `src/run.py` validates `config.json` against it at startup
 (unknown keys warn and are ignored); cross-field rules it can't express (e.g.
 `history_length + prediction_offset` ≤ input rows) are checked once the data loads.
 
@@ -54,6 +55,22 @@ docker run --rm -v $(pwd)/work/input:/work/input <image> --check-config
 Checks `config.json` against `fdo.json` and exits `0` (`config.json OK`) or `1`
 (`ERROR:` lines); reads no data, loads no weights. Locally:
 `WORK_DIR=./work python src/run.py --check-config`.
+
+## Model card
+
+[`fdo.json`](fdo.json) is the model card, following the EPISERVE
+[model-card v1 spec](https://github.com/The-EPISERVE-Consortium/episerve_specs/blob/main/src/episerve_specs/specs/model_card/README.md):
+parameters (`episerve:parameters`, a JSON Schema of `config.json`), input and
+output files with their columns, resources and documentation. CI checks it
+(job `model-card`); locally:
+
+```bash
+pip install "git+https://github.com/The-EPISERVE-Consortium/episerve_specs@v0.1.0"
+episerve-validate fdo.json
+```
+
+The platform still reads the parameters from `additionalProperty`; the card
+keeps both, and the validator fails if they disagree.
 
 ## Develop
 

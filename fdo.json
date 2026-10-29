@@ -1,6 +1,10 @@
 {
-  "@context": "https://schema.org/",
+  "@context": [
+    "https://schema.org/",
+    { "episerve": "https://api.episerve.zib.de/schemas/model-card/v1#" }
+  ],
   "@type": "SoftwareApplication",
+  "conformsTo": "https://api.episerve.zib.de/schemas/model-card/v1.json",
   "name": "model__prediction__generic__timesfm",
   "description": "Zero-shot time-series forecasting with Google TimesFM 2.5, a 200M-parameter foundation model applied without training or fine-tuning. Reads a parquet with exactly two columns - x (first) and y (second) - and forecasts y with point plus 10th/90th percentile predictions.",
   "url": "ghcr.io/the-episerve-consortium/model__prediction__generic__timesfm",
@@ -8,10 +12,110 @@
   "applicationCategory": "algorithm",
   "operatingSystem": "Linux",
   "runtimePlatform": "Docker",
-  "author": {
-    "@type": "Organization",
-    "name": "EPISERVE Consortium"
+  "author": { "@type": "Organization", "name": "EPISERVE Consortium" },
+
+  "episerve:task": {
+    "type": "forecast",
+    "frequency": "any",
+    "probabilistic": true,
+    "covariates": false,
+    "maxHorizon": 512,
+    "parameterRoles": {
+      "horizon": "prediction_length",
+      "history": "history_length",
+      "offset": "prediction_offset"
+    }
   },
+
+  "episerve:parameters": {
+    "type": "object",
+    "required": ["history_length", "prediction_length"],
+    "additionalProperties": false,
+    "properties": {
+      "history_length": {
+        "type": "integer",
+        "minimum": 3,
+        "unit": "steps",
+        "description": "Number of rows to use as model context. Window ends at total_rows - prediction_offset. Minimum 3 (the model's minimum context). Values above 2048 use only the most recent 2048 rows."
+      },
+      "prediction_length": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 512,
+        "unit": "steps",
+        "description": "Number of steps to forecast ahead."
+      },
+      "prediction_offset": {
+        "type": "integer",
+        "minimum": 0,
+        "default": 0,
+        "unit": "steps",
+        "description": "Rows to skip at the end before the history window. Use for back-testing against known data."
+      }
+    },
+    "rules": [
+      "history_length + prediction_offset must not exceed the number of rows of input.parquet."
+    ]
+  },
+
+  "episerve:inputs": [
+    {
+      "file": "input.parquet",
+      "format": "application/vnd.apache.parquet",
+      "description": "One series: the time axis first, the values second. Column names are free and are kept in the output.",
+      "minRows": 3,
+      "additionalColumns": false,
+      "columns": [
+        {
+          "position": 0,
+          "role": "time",
+          "type": ["date", "datetime", "isoWeek", "integer", "number"],
+          "description": "Evenly spaced x values; the step is inferred from them and used to extrapolate the forecast's x values."
+        },
+        {
+          "position": 1,
+          "role": "target",
+          "type": "number",
+          "nullable": true,
+          "description": "The series to forecast. Interior gaps are interpolated linearly, gaps at the ends are filled with the nearest value."
+        }
+      ]
+    }
+  ],
+
+  "episerve:outputs": [
+    {
+      "file": "predictions.tsv",
+      "format": "text/tab-separated-values",
+      "description": "One row per forecast step.",
+      "columns": [
+        { "nameFrom": { "inputRole": "time" }, "role": "time" },
+        { "name": "x_auto_converted", "role": "other", "type": "integer", "required": false,
+          "description": "Only when the x column holds strings (e.g. ISO weeks): the step's row position." },
+        { "nameFrom": { "inputRole": "target" }, "role": "point", "type": "number",
+          "description": "TimesFM point forecast." },
+        { "nameFrom": { "inputRole": "target", "suffix": "_q10" }, "role": "quantile", "level": 0.1, "type": "number" },
+        { "nameFrom": { "inputRole": "target", "suffix": "_q90" }, "role": "quantile", "level": 0.9, "type": "number" }
+      ]
+    }
+  ],
+
+  "episerve:resources": {
+    "gpu": 0,
+    "network": true
+  },
+
+  "episerve:documentation": {
+    "method": "Google TimesFM 2.5 (200M parameters), a decoder-only time-series foundation model, applied zero-shot on CPU. Context up to 2048 points.",
+    "intendedUse": "Quick probabilistic baseline forecasts of a single epidemiological time series.",
+    "limitations": "Univariate only: no covariates and no groups. The weights (about 800 MB) are downloaded from Hugging Face on the first run, so the container needs internet access.",
+    "trainingData": "Not trained by EPISERVE; uses the published pretrained weights google/timesfm-2.5-200m-pytorch.",
+    "references": [
+      "https://github.com/google-research/timesfm",
+      "https://huggingface.co/google/timesfm-2.5-200m-pytorch"
+    ]
+  },
+
   "additionalProperty": [
     {
       "@type": "PropertyValue",
