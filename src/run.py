@@ -32,17 +32,14 @@ except json.JSONDecodeError as exc:
     print(f"ERROR: invalid config.json: {exc}", file=sys.stderr)
     sys.exit(1)
 
-# Validate config.json against the parameter declaration in fdo.json:
-# required keys, integer typing, and any minValue/maxValue bounds. Defaults
-# for omitted optional keys come from fdo.json too.
+# Validate config.json against the model card's episerve:parameters in
+# fdo.json: required keys, types, bounds, no unknown keys. Defaults for
+# omitted optional keys come from the card too.
 try:
-    resolved, config_errors, config_warnings = validate_config(config)
+    resolved, config_errors = validate_config(config)
 except SchemaError as exc:
-    print(f"ERROR: model config schema (fdo.json) is invalid: {exc}", file=sys.stderr)
+    print(f"ERROR: model card (fdo.json) parameters are invalid: {exc}", file=sys.stderr)
     sys.exit(1)
-
-for warning in config_warnings:
-    print(f"WARNING: {warning}", file=sys.stderr)
 
 if config_errors:
     for error in config_errors:

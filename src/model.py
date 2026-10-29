@@ -17,8 +17,8 @@ _MAX_CONTEXT = 2048
 
 # Min history points fed to the model. TimesFM requires a minimum context to
 # produce a forecast; shorter windows would otherwise reach forecast() and
-# fail with an uncaught non-ValueError. fdo.json declares this as
-# history_length's minValue (kept in sync by tests/test_config_schema.py), so
+# fail with an uncaught non-ValueError. The model card (fdo.json) declares
+# this as history_length's minimum (kept in sync by tests/test_config_schema.py), so
 # run.py rejects anything lower up front; predict() also guards it directly
 # for library callers.
 _MIN_CONTEXT = 3

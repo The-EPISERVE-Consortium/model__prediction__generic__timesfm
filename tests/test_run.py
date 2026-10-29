@@ -268,6 +268,16 @@ def test_check_config_reports_missing_required_key(tmp_path):
     assert "config.json OK" not in result.stdout
 
 
+def test_check_config_rejects_an_unknown_key(tmp_path):
+    """The card forbids undeclared keys, so a misspelt one stops the run."""
+    result = _run_with_config(
+        tmp_path, {"history_length": 10, "prediction_length": 5, "prediciton_offset": 2}, args=("--check-config",)
+    )
+
+    assert result.returncode == 1
+    assert "ERROR: config.json has unrecognised key(s): 'prediciton_offset'" in result.stderr
+
+
 def test_check_config_still_warns_about_over_long_history(tmp_path):
     """--check-config passes but still emits the >max-context WARNING."""
     result = _run_with_config(

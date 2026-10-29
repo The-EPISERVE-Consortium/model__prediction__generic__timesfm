@@ -37,11 +37,12 @@ the nearest value. Needs ≥ `history_length + prediction_offset` rows.
 ## Config
 
 Parameters are declared in [`fdo.json`](fdo.json), the model card (see
-*Model card* below): `episerve:parameters`, mirrored in `additionalProperty` —
-the source of truth for names, whether each is required, defaults, and
-`minValue`/`maxValue`. `src/config_schema.py` reads `additionalProperty`. `src/run.py` validates `config.json` against it at startup
-(unknown keys warn and are ignored); cross-field rules it can't express (e.g.
-`history_length + prediction_offset` ≤ input rows) are checked once the data loads.
+*Model card* below): `episerve:parameters` is a JSON Schema of `config.json` —
+the source of truth for names, types, whether each is required, defaults and
+bounds. `src/config_schema.py` reads it, and `src/run.py` checks `config.json`
+against it at startup with `jsonschema`; an undeclared key is an error. Cross-field
+rules it can't express (e.g. `history_length + prediction_offset` ≤ input rows,
+listed as `rules` in the card) are checked once the data loads.
 
 `prediction_offset` skips rows at the end before the history window — set it to
 `prediction_length` to forecast over already-known data for back-testing.
@@ -65,12 +66,13 @@ output files with their columns, resources and documentation. CI checks it
 (job `model-card`); locally:
 
 ```bash
-pip install "git+https://github.com/The-EPISERVE-Consortium/episerve_specs@v0.1.0"
+pip install "git+https://github.com/The-EPISERVE-Consortium/episerve_specs@v0.2.0"
 episerve-validate fdo.json
 ```
 
-The platform still reads the parameters from `additionalProperty`; the card
-keeps both, and the validator fails if they disagree.
+The platform reads the card from this repository: the sync flow stores its
+sections in the catalog, and the API checks a run's config against
+`episerve:parameters` before starting it.
 
 ## Develop
 
