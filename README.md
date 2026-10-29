@@ -66,7 +66,7 @@ output files with their columns, resources and documentation. CI checks it
 (job `model-card`); locally:
 
 ```bash
-pip install "git+https://github.com/The-EPISERVE-Consortium/episerve_specs@v0.2.0"
+pip install "git+https://github.com/The-EPISERVE-Consortium/episerve_specs@v0.2.1"
 episerve-validate fdo.json
 ```
 
