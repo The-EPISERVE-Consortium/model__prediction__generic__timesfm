@@ -6,7 +6,7 @@
   "@type": "SoftwareApplication",
   "conformsTo": "https://api.episerve.zib.de/schemas/model-card/v1.json",
   "name": "model__prediction__generic__timesfm",
-  "description": "Zero-shot time-series forecasting with Google TimesFM 2.5, a 200M-parameter foundation model applied without training or fine-tuning. Reads a parquet with exactly two columns - x (first) and y (second) - and forecasts y with point plus 10th/90th percentile predictions.",
+  "description": "Zero-shot forecast of one time series with Google TimesFM 2.5, including 10th and 90th percentiles.",
   "url": "ghcr.io/the-episerve-consortium/model__prediction__generic__timesfm",
   "codeRepository": "https://github.com/The-EPISERVE-Consortium/model__prediction__generic__timesfm",
   "applicationCategory": "algorithm",
