@@ -351,3 +351,17 @@ def test_model_loaded_once(mock_timesfm):
     predict(x, y, prediction_length=4)
     predict(x, y, prediction_length=4)
     assert mock_timesfm.from_pretrained.call_count == 1
+
+
+def test_model_loads_pinned_weights(mock_timesfm):
+    """Load the exact TimesFM weights snapshot rather than a moving branch.
+
+    Args:
+        mock_timesfm: Mocked TimesFM loader supplied by the fixture.
+    """
+    x, y = _make_xy()
+    predict(x, y, prediction_length=4)
+    mock_timesfm.from_pretrained.assert_called_once_with(
+        "google/timesfm-2.5-200m-pytorch",
+        revision="1d952420fba87f3c6dee4f240de0f1a0fbc790e3",
+    )

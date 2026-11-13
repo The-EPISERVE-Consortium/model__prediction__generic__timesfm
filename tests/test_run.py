@@ -75,11 +75,12 @@ class TimesFM_2p5_200M_torch:
     \"\"\"Stub TimesFM torch loader.\"\"\"
 
     @classmethod
-    def from_pretrained(cls, name):
+    def from_pretrained(cls, name, revision=None):
         \"\"\"Return a stub TimesFM model.
 
         Args:
             name: Model name.
+            revision: Pinned Hugging Face weights revision.
 
         Returns:
             Stub TimesFM model.

@@ -6,6 +6,9 @@ import timesfm
 
 _tfm = None
 
+_MODEL_ID = "google/timesfm-2.5-200m-pytorch"
+_MODEL_REVISION = "1d952420fba87f3c6dee4f240de0f1a0fbc790e3"
+
 # Max forecast steps (must be a multiple of 128).
 _MAX_PREDICTION_STEPS = 512
 
@@ -220,7 +223,7 @@ def _validate_forecast_shapes(point, quantiles, prediction_length: int) -> None:
 
 
 def _model():
-    """Return the cached TimesFM model instance.
+    """Return the cached TimesFM model at the pinned weights revision.
 
     Returns:
         timesfm.TimesFM: Compiled TimesFM model instance.
@@ -228,7 +231,7 @@ def _model():
     global _tfm
     if _tfm is None:
         tfm = timesfm.TimesFM_2p5_200M_torch.from_pretrained(
-            "google/timesfm-2.5-200m-pytorch"
+            _MODEL_ID, revision=_MODEL_REVISION
         )
         tfm.compile(timesfm.ForecastConfig(
             max_context=_MAX_CONTEXT,

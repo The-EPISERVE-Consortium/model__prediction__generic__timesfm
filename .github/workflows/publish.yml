@@ -48,6 +48,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           push: false
           load: true
           tags: episerve-model:ci
@@ -67,6 +69,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           push: true
           tags: ${{ env.IMAGE }}:latest
           cache-from: type=gha
@@ -76,6 +80,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           push: true
           tags: |
             ${{ env.IMAGE }}:${{ github.ref_name }}

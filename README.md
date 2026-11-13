@@ -87,9 +87,15 @@ docker run --rm -v $(pwd)/work/input:/work/input -v $(pwd)/work/output:/work/out
   episerve/generic-timesfm:dev
 ```
 
-Model weights (~800 MB) download from HuggingFace on first real run.
+Model weights (~800 MB) download from Hugging Face on the first real run.
+The weights are pinned to commit `1d952420fba87f3c6dee4f240de0f1a0fbc790e3` via
+`_MODEL_REVISION` in `src/model.py`; update that constant deliberately when
+upgrading the weights. They are not bundled in the container image.
 
 ## Release
+
+Images built by CI include the source Git commit SHA in the OCI label
+`org.opencontainers.image.revision`.
 
 Push to `main` → CI builds, tests inside the image, and pushes `:latest` to GHCR.
 `git tag v0.1.0 && git push origin v0.1.0` also publishes `:v0.1.0`.
